@@ -1,7 +1,8 @@
 import logging
-import os
+import os 
 import boto3
 import redis
+from typing import List  # Fixed: Compatible with Py3.8+
 from datetime import datetime, timedelta, timezone
 from tasks import evaluate_model_task
 import config
@@ -14,11 +15,11 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 s3 = boto3.client('s3')
-# Use the same Redis container as Celery for deduplication
+# Use the same Redis container as Celery
 redis_client = redis.Redis(host='redis', port=6379, db=1)
 PROCESSED_SET_KEY = "processed_models_history"
 
-def get_new_model_folders(bucket_name: str, hours: int = 24) -> list[str]:
+def get_new_model_folders(bucket_name: str, hours: int = 24) -> List[str]:
     """
     Scans S3 for 'folders' (prefixes) modified in the last N hours.
     Returns a list of prefixes (e.g., 'models/llama-3-8b-quantized/').
@@ -27,8 +28,6 @@ def get_new_model_folders(bucket_name: str, hours: int = 24) -> list[str]:
     candidates = set()
 
     paginator = s3.get_paginator('list_objects_v2')
-    # Filter by a specific models prefix if your bucket isn't just for models
-    # Here we assume root level folders or a 'models/' prefix
     pages = paginator.paginate(Bucket=bucket_name)
 
     for page in pages:
@@ -44,8 +43,16 @@ def get_new_model_folders(bucket_name: str, hours: int = 24) -> list[str]:
             if obj['LastModified'] > cutoff:
                 # Logic: If a file ends with model weights, get its parent folder
                 if key.endswith(('.safetensors', '.bin', '.gguf')):
-                    # "models/llama/model.gguf" -> "models/llama/"
-                    folder_prefix = os.path.dirname(key) + '/'
+                    # Fixed: Root-level file safety check
+                    folder_prefix = os.path.dirname(key)
+                    
+                    # If folder_prefix is empty, the file is at bucket root.
+                    # Downloading root ('/') would download the ENTIRE bucket.
+                    if not folder_prefix:
+                        logger.warning(f"Skipping root-level file '{key}' to prevent bucket dump.")
+                        continue
+                        
+                    folder_prefix = folder_prefix + '/'
                     candidates.add(folder_prefix)
     
     return list(candidates)
@@ -68,12 +75,14 @@ def trigger_nightly_queue():
     
     count = 0
     for folder_prefix in model_folders:
-        # Race Condition Fix: Check Redis Set
+        # Deduplication
         if not redis_client.sismember(PROCESSED_SET_KEY, folder_prefix):
             # Enqueue the FOLDER path
             evaluate_model_task.delay(folder_prefix)
             
-            # Mark as processed immediately (or move this to worker success)
+            # Design Choice: We mark as processed HERE (Circuit Breaker).
+            # If we move this to the worker and the worker SegFaults (crashes),
+            # the scheduler will infinite-loop retry this bad model every hour.
             redis_client.sadd(PROCESSED_SET_KEY, folder_prefix)
             logger.info(f"Queued: {folder_prefix}")
             count += 1

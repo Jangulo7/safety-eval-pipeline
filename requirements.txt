@@ -1,15 +1,16 @@
 boto3
+redis>=5.0.0
 celery[redis]
 streamlit
 pandas
 altair
 requests
-# LightEval specific
+# LightEval and Core ML
 git+https://github.com/huggingface/lighteval.git
 accelerate
 bitsandbytes
 scipy
 sentencepiece
 protobuf
-# Optional: for specific quantization formats
+# Optional: GGUF support
 auto-gptq
