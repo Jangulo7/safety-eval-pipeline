@@ -47,11 +47,6 @@ cd llm-nightly-eval
 # Create the environment config (DO NOT COMMIT THIS FILE)
 touch .env
 
-This README is designed to be professional, audit-ready, and aligned with the Artificial Analysis methodology. It emphasizes the "Quality vs. Efficiency" trade-off that is central to your quantization repository.📊 Nightly AI Evaluation PipelineAutomated Overnight Benchmarking for Quantized LLMsThis repository hosts the Overnight Evaluation Queue, a fully automated pipeline designed to benchmark new quantized Large Language Models (LLMs) uploaded to our S3 artifact store. It executes Artificial Analysis compliant benchmarks (MMLU, GSM8K, HumanEval) to assess the degradation of Quality vs. Quantization Efficiency.📖 OverviewThe pipeline operates on a "Just-In-Time" architecture to maximize resource efficiency. It wakes up nightly, scans for fresh models, isolates them in ephemeral GPU processes, and publishes the results to a visual dashboard.Key Features:Memory Safe: Uses subprocess isolation to prevent CUDA VRAM fragmentation and OOM crashes.Storage Optimized: Implements a Fetch-Eval-Purge cycle to keep disk usage low.Leaderboard Compliant: Uses lighteval with leaderboard task definitions to ensure metrics match public Open LLM Leaderboards.Passive Observability: Silent success/failure alerts sent directly to Slack/Teams.🏗 ArchitectureThe system is containerized using Docker Compose and consists of four primary services:ComponentService NameDescriptionWatcherschedulerA lightweight Cron script that scans S3 hourly for new .gguf or .safetensors artifacts.BrokerredisA Redis instance that manages the FIFO job queue.WorkerworkerThe heavy lifter. It claims the GPU, downloads the model, runs the eval, and uploads JSON results.DashboarddashboardA Streamlit app that visualizes "Quality vs. Quantization" trade-offs.📉 Benchmark Coverage (Artificial Analysis)We adhere to the Artificial Analysis Intelligence Index methodology to ensure our internal metrics map to external standards.CategoryBenchmarkLightEval Task StringMetricQuality (Knowledge)MMLU (5-shot)`leaderboardmmlu:majorReasoning (Math)GSM8K (5-shot)`leaderboardgsm8kCodingHumanEval (0-shot)`leaderboardhumanevalCommon SenseHellaSwag (10-shot)`leaderboardhellaswag🚀 Getting StartedPrerequisitesDocker & Docker ComposeNVIDIA Container Toolkit (The worker requires access to the host GPU).An AWS S3 Bucket containing your models.1. Clone & ConfigureClone the repository and create your environment file.Bashgit clone https://github.com/your-org/llm-nightly-eval.git
-cd llm-nightly-eval
-
-# Create the environment config (DO NOT COMMIT THIS FILE)
-touch .env
 2. Environment VariablesPopulate .env with your credentials:
 
 # AWS Credentials (S3 Access)
@@ -63,19 +58,9 @@ S3_MODEL_BUCKET=acme-llm-quantized-models
 # Alerting (Optional)
 ALERT_WEBHOOK_URL=https://hooks.slack.com/services/T000/B000/XXXX
 
-This README is designed to be professional, audit-ready, and aligned with the Artificial Analysis methodology. It emphasizes the "Quality vs. Efficiency" trade-off that is central to your quantization repository.📊 Nightly AI Evaluation PipelineAutomated Overnight Benchmarking for Quantized LLMsThis repository hosts the Overnight Evaluation Queue, a fully automated pipeline designed to benchmark new quantized Large Language Models (LLMs) uploaded to our S3 artifact store. It executes Artificial Analysis compliant benchmarks (MMLU, GSM8K, HumanEval) to assess the degradation of Quality vs. Quantization Efficiency.📖 OverviewThe pipeline operates on a "Just-In-Time" architecture to maximize resource efficiency. It wakes up nightly, scans for fresh models, isolates them in ephemeral GPU processes, and publishes the results to a visual dashboard.Key Features:Memory Safe: Uses subprocess isolation to prevent CUDA VRAM fragmentation and OOM crashes.Storage Optimized: Implements a Fetch-Eval-Purge cycle to keep disk usage low.Leaderboard Compliant: Uses lighteval with leaderboard task definitions to ensure metrics match public Open LLM Leaderboards.Passive Observability: Silent success/failure alerts sent directly to Slack/Teams.🏗 ArchitectureThe system is containerized using Docker Compose and consists of four primary services:ComponentService NameDescriptionWatcherschedulerA lightweight Cron script that scans S3 hourly for new .gguf or .safetensors artifacts.BrokerredisA Redis instance that manages the FIFO job queue.WorkerworkerThe heavy lifter. It claims the GPU, downloads the model, runs the eval, and uploads JSON results.DashboarddashboardA Streamlit app that visualizes "Quality vs. Quantization" trade-offs.📉 Benchmark Coverage (Artificial Analysis)We adhere to the Artificial Analysis Intelligence Index methodology to ensure our internal metrics map to external standards.CategoryBenchmarkLightEval Task StringMetricQuality (Knowledge)MMLU (5-shot)`leaderboardmmlu:majorReasoning (Math)GSM8K (5-shot)`leaderboardgsm8kCodingHumanEval (0-shot)`leaderboardhumanevalCommon SenseHellaSwag (10-shot)`leaderboardhellaswag🚀 Getting StartedPrerequisitesDocker & Docker ComposeNVIDIA Container Toolkit (The worker requires access to the host GPU).An AWS S3 Bucket containing your models.1. Clone & ConfigureClone the repository and create your environment file.Bashgit clone https://github.com/your-org/llm-nightly-eval.git
-cd llm-nightly-eval
-
 # Create the environment config (DO NOT COMMIT THIS FILE)
 touch .env
-2. Environment VariablesPopulate .env with your credentials:Ini, TOML# AWS Credentials (S3 Access)
-AWS_ACCESS_KEY_ID=your_access_key_here
-AWS_SECRET_ACCESS_KEY=your_secret_key_here
-AWS_DEFAULT_REGION=us-east-1
-S3_MODEL_BUCKET=acme-llm-quantized-models
 
-# Alerting (Optional)
-ALERT_WEBHOOK_URL=https://hooks.slack.com/services/T000/B000/XXXX
 3. Launch the StackDeploy the pipeline in detached mode.
 
 docker-compose up --build -d
@@ -99,8 +84,8 @@ If you need to evaluate a specific model immediately (bypassing the cron schedul
 docker-compose exec scheduler python
 
 # Inside Python shell:
->>> from tasks import evaluate_model_task
->>> evaluate_model_task.delay("path/to/model_folder_in_s3")
+from tasks import evaluate_model_task
+evaluate_model_task.delay("path/to/model_folder_in_s3")
 
 Logs & Debugging
 Check the worker logs to see real-time evaluation progress:
@@ -127,6 +112,8 @@ BENCHMARK_SUITE = [
     # ... existing benchmarks ...
     "leaderboard|arc:challenge|25|0"  # Added ARC 25-shot
 ]
+
+
 
 
 

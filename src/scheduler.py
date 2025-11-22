@@ -1,36 +1,86 @@
 import logging
-from datetime import datetime, timedelta, timezone
+import os
 import boto3
+import redis
+from datetime import datetime, timedelta, timezone
 from tasks import evaluate_model_task
 import config
 
-logging.basicConfig(level=logging.INFO)
+# Configure Logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
-s3 = boto3.client('s3')
 
-def get_recent_models(hours: int = 24):
-    """Scans S3 for models updated in the last N hours."""
+s3 = boto3.client('s3')
+# Use the same Redis container as Celery for deduplication
+redis_client = redis.Redis(host='redis', port=6379, db=1)
+PROCESSED_SET_KEY = "processed_models_history"
+
+def get_new_model_folders(bucket_name: str, hours: int = 24) -> list[str]:
+    """
+    Scans S3 for 'folders' (prefixes) modified in the last N hours.
+    Returns a list of prefixes (e.g., 'models/llama-3-8b-quantized/').
+    """
     cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
-    candidates = []
-    
+    candidates = set()
+
     paginator = s3.get_paginator('list_objects_v2')
-    for page in paginator.paginate(Bucket=config.S3_BUCKET_NAME):
-        if 'Contents' not in page: continue
+    # Filter by a specific models prefix if your bucket isn't just for models
+    # Here we assume root level folders or a 'models/' prefix
+    pages = paginator.paginate(Bucket=bucket_name)
+
+    for page in pages:
+        if 'Contents' not in page:
+            continue
+            
         for obj in page['Contents']:
+            key = obj['Key']
+            # Ignore benchmark results to prevent infinite loops
+            if config.S3_RESULTS_PREFIX in key:
+                continue
+
             if obj['LastModified'] > cutoff:
-                # Logic: Identify model folders or GGUF/SafeTensors files
-                key = obj['Key']
-                # Filter out results folder to avoid infinite loops
-                if "benchmarks/" in key: continue 
+                # Logic: If a file ends with model weights, get its parent folder
                 if key.endswith(('.safetensors', '.bin', '.gguf')):
-                    # If it's a file in a folder, get the folder path (virtual HF repo)
-                    # Or strictly pass the file if using GGUF
-                    candidates.append(key)
-    return list(set(candidates))
+                    # "models/llama/model.gguf" -> "models/llama/"
+                    folder_prefix = os.path.dirname(key) + '/'
+                    candidates.add(folder_prefix)
+    
+    return list(candidates)
+
+def trigger_nightly_queue():
+    """Finds new models and enqueues them if not processed."""
+    logger.info("Starting nightly queue population...")
+    
+    try:
+        model_folders = get_new_model_folders(config.S3_BUCKET_NAME)
+    except Exception as e:
+        logger.error(f"Failed to scan S3: {e}")
+        return
+
+    if not model_folders:
+        logger.info("No modified model folders found in the last 24h.")
+        return
+
+    logger.info(f"Found {len(model_folders)} candidate folders.")
+    
+    count = 0
+    for folder_prefix in model_folders:
+        # Race Condition Fix: Check Redis Set
+        if not redis_client.sismember(PROCESSED_SET_KEY, folder_prefix):
+            # Enqueue the FOLDER path
+            evaluate_model_task.delay(folder_prefix)
+            
+            # Mark as processed immediately (or move this to worker success)
+            redis_client.sadd(PROCESSED_SET_KEY, folder_prefix)
+            logger.info(f"Queued: {folder_prefix}")
+            count += 1
+        else:
+            logger.debug(f"Skipping {folder_prefix} (Already Processed)")
+
+    logger.info(f"Successfully added {count} new jobs to the queue.")
 
 if __name__ == "__main__":
-    logger.info("Running nightly scheduler...")
-    models = get_recent_models()
-    for m in models:
-        evaluate_model_task.delay(m)
-        logger.info(f"Queued: {m}")
+    trigger_nightly_queue()
