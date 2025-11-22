@@ -1,0 +1,15 @@
+boto3
+celery[redis]
+streamlit
+pandas
+altair
+requests
+# LightEval specific
+git+https://github.com/huggingface/lighteval.git
+accelerate
+bitsandbytes
+scipy
+sentencepiece
+protobuf
+# Optional: for specific quantization formats
+auto-gptq

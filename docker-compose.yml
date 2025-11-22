@@ -1,0 +1,59 @@
+services:
+  redis:
+    image: redis:7-alpine
+    networks:
+      - eval-net
+
+  scheduler:
+    build: .
+    command: >
+      sh -c "while true; do 
+               echo 'Checking S3 for new models...'; 
+               python scheduler.py; 
+               echo 'Sleeping for 1 hour...'; 
+               sleep 3600; 
+             done"
+    env_file: .env
+    depends_on:
+      - redis
+    networks:
+      - eval-net
+
+  worker:
+    build: .
+    # Concurrency 1 ensures strictly ONE model per GPU to prevent OOM
+    command: celery -A tasks worker --loglevel=info --concurrency=1
+    env_file: .env
+    environment:
+      - CUDA_VISIBLE_DEVICES=0
+    volumes:
+      - hf_cache:/root/.cache/huggingface
+      - temp_models:/tmp/eval_models
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    depends_on:
+      - redis
+    networks:
+      - eval-net
+
+  dashboard:
+    build: .
+    command: streamlit run dashboard.py --server.port 8501 --server.address 0.0.0.0
+    env_file: .env
+    ports:
+      - "8501:8501"
+    networks:
+      - eval-net
+
+volumes:
+  hf_cache:
+  temp_models:
+
+networks:
+  eval-net:
+    driver: bridge
