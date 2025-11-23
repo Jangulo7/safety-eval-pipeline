@@ -114,6 +114,90 @@ BENCHMARK_SUITE = [
 ]
 
 
+# Parameter Register for Automated Evaluation
 
+I've updated the parameter tables, automation keys, and code accordingly. This ensures full reproducibility, compliance, and utility for multi-stakeholder analysis of quantized models.
+
+## Automation Keys (Updated)
+
+- **[AUTO-Header]**: Extracted automatically from GGUF/Model file headers.
+- **[AUTO-Env]**: Scraped from the runtime environment (Python, OS, GPU drivers).
+- **[AUTO-Plat]**: Pulled via API from your Model/Quantization Platform (with fallback to header/manual if API unavailable).
+- **[AUTO-Tool]**: Scraped from the evaluation tool itself (e.g., git commit, package versions). *New*
+- **[Manual/Config]**: Defined in the job config (YAML/JSON).
+- **[Manual/Default]**: Fallback values hardcoded in code if missing from config.
+
+## A. Model Identity & Quantization (Crucial for Model Team)
+
+**Justification**: Unchanged—essential for debugging quantization impacts like accuracy drops. Added group_size (common in schemes like Q4_K_M/GPTQ) and model_release_date (for daily quantized releases).
+
+| Parameter            | Description                                      | Needed By                  | Automation                  |
+|----------------------|--------------------------------------------------|----------------------------|-----------------------------|
+| model_id             | Unique ID (e.g., llama-3.1-8b-q4_k_m)            | All                        | [Manual/Config]             |
+| base_model_family    | e.g., Llama, Mistral, Qwen                       | Research                   | [AUTO-Header]               |
+| param_count_billions | e.g., 8, 70, 405                                 | Pre-Sales (Sizing)         | [AUTO-Header]               |
+| quant_scheme         | e.g., Q4_K_M, IQ2_XXS, GPTQ                      | Model Team                 | [AUTO-Header]               |
+| bits_per_weight      | Average bits (e.g., 4.65)                        | Research                   | [AUTO-Header]               |
+| group_size           | Grouping for quantization (e.g., 128 for GPTQ)   | Model Team                 | [AUTO-Header or AUTO-Plat]  |
+| pruning_method       | e.g., Wanda, Magnitude, SparseGPT                | Model Team                 | [AUTO-Plat]                 |
+| sparsity_ratio       | % of zeros (e.g., 0.3 for 30%)                   | Model Team                 | [AUTO-Plat]                 |
+| healing_applied      | Boolean (Was retraining applied?)                | Model Team                 | [AUTO-Plat]                 |
+| calibration_dataset  | Dataset used for quant calibration               | Research (Bias check)      | [AUTO-Plat]                 |
+| model_release_date   | Date the quantized model was released (e.g., 2025-11-22) | All (Daily tracking)       | [AUTO-Plat or Manual/Config]|
+| file_hash_sha256     | Checksum of the .gguf file                       | ISO 27001 (Integrity)      | [AUTO-Env]                  |
+
+## B. Inference Configuration (Crucial for Research)
+
+**Justification**: Unchanged—key for reproducing scores. Added random_seed (even at temp 0.0, affects sampling) and repetition_penalty (common in benchmarks to reduce verbosity).
+
+| Parameter           | Description                                      | Needed By                  | Automation                             |
+|---------------------|--------------------------------------------------|----------------------------|----------------------------------------|
+| temperature         | Randomness (usually 0.0 for bench)               | Research                   | [Manual/Default: 0.0]                  |
+| top_p / top_k       | Nucleus sampling params                          | Research                   | [Manual/Default: top_p=1.0, top_k=50]  |
+| random_seed         | Seed for reproducibility                         | Research                   | [Manual/Default: 42]                   |
+| repetition_penalty  | Penalty for repeated tokens (e.g., 1.1)          | Research                   | [Manual/Default: 1.0]                  |
+| max_context_window  | Model's limit (e.g., 128k)                       | Pre-Sales (RAG)            | [AUTO-Header]                          |
+| batch_size          | Concurrency level (e.g., 1, 8, 32)               | Pre-Sales (Throughput)     | [Manual/Config]                        |
+| rope_scaling        | Scaling factor for long context                  | Research                   | [AUTO-Header]                          |
+| gpu_split_strategy  | How layers are split across GPUs                 | Ops/Eng                    | [AUTO-Env]                             |
+| system_prompt_id    | ID of the system prompt used                     | Research (Prompt Eng)      | [Manual/Config]                        |
+
+## C. Hardware & Environment (Crucial for Pre-Sales & ISO)
+
+**Justification**: Unchanged—vital for performance promises. Added cpu_model and system_ram_gb (for CPU fallbacks or mixed workloads), and handled heterogeneous GPUs.
+
+| Parameter              | Description                                      | Needed By                  | Automation                  |
+|------------------------|--------------------------------------------------|----------------------------|-----------------------------|
+| gpu_model              | List if heterogeneous (e.g., ['H200 SXM', 'A100-80GB']) | Pre-Sales                  | [AUTO-Env] (nvidia-smi)     |
+| gpu_count              | Number of GPUs used                              | Sales (Cost calc)          | [AUTO-Env]                  |
+| cpu_model              | CPU details (e.g., Intel Xeon)                   | Ops (Fallback)             | [AUTO-Env]                  |
+| system_ram_gb          | Total system RAM                                 | Ops                        | [AUTO-Env]                  |
+| driver_version         | CUDA/Driver version                              | Ops (Debugging)            | [AUTO-Env]                  |
+| inference_backend      | llama.cpp, vLLM, TGI                             | Research                   | [Manual/Config]             |
+| quant_backend_version  | Version of the quant runtime                     | Model Team                 | [AUTO-Env]                  |
+
+## D. Business & Metrics Classification (Crucial for Reporting)
+
+**Justification**: Unchanged—good for filtering. Added use_case_tags (e.g., ["chat", "code-gen"]) for finer granularity.
+
+| Parameter            | Description                                      | Needed By                  | Automation                  |
+|----------------------|--------------------------------------------------|----------------------------|-----------------------------|
+| benchmark_category   | General, RAG, Agentic, Coding                    | Sales (Grouping)           | [Manual/Config]             |
+| industry_vertical    | Medical, Legal, Finance                          | Sales (Pitching)           | [Manual/Config]             |
+| use_case_tags        | Tags like "chat", "summarization"                 | Sales                      | [Manual/Config]             |
+| metric_type          | Accuracy, Hallucination, Bias                    | ISO 27001 (Safety)         | [Manual/Config]             |
+| dataset_version      | Version of MMLU/DeepEval dataset                 | Research                   | [Manual/Config]             |
+
+## E. Tool & Pipeline Metadata (New Category: Crucial for Reproducibility & Auditing)
+
+**Justification**: The evaluation tool itself evolves; logging its state ensures benchmarks are traceable over time. This is key for overnight pipelines where code might update daily.
+
+| Parameter                | Description                                      | Needed By                  | Automation                             |
+|--------------------------|--------------------------------------------------|----------------------------|----------------------------------------|
+| eval_tool_version        | Version of the benchmarking framework (e.g., DeepEval 1.2.3) | Research                   | [AUTO-Tool]                            |
+| eval_tool_commit_hash    | Git commit of the evaluation code                | ISO 27001 (Audit)          | [AUTO-Tool]                            |
+| python_package_versions  | Key deps (e.g., {'torch': '2.1.0'})              | Ops (Debugging)            | [AUTO-Tool]                            |
+| run_timestamp            | UTC ISO time of run start                        | All                        | [AUTO-Env]                             |
+| run_duration_seconds     | Total runtime                                    | Pre-Sales (Perf)           | [AUTO-Env] (Calculated post-run)       |
 
 

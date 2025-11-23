@@ -1,4 +1,4 @@
-.PHONY: help install format lint static test test-cov profile clean all
+.PHONY: help install format lint static test tests test-cov profile clean all
 
 # Default target
 help:
@@ -11,6 +11,7 @@ help:
 	@echo "  make lint        - Run flake8 linter"
 	@echo "  make static      - Run mypy type checking"
 	@echo "  make test        - Run pytest test suite"
+	@echo "  make tests       - Same as 'make test'"
 	@echo "  make test-cov    - Run tests with coverage report"
 	@echo "  make profile     - Run cProfile performance analysis"
 	@echo "  make all         - Run format, lint, static, and test"
@@ -48,17 +49,20 @@ static:
 	@echo ""
 	@echo "Type checking complete!"
 
-# Run pytest
+# Run pytest (single target)
 test:
 	@echo "=== Running pytest ==="
 	pytest tests/ -v --tb=short
 	@echo ""
 	@echo "Tests complete!"
 
+# Alias for test (for those who type 'make tests')
+tests: test
+
 # Run tests with coverage
 test-cov:
 	@echo "=== Running pytest with coverage ==="
-	pytest tests/ -v --cov=src --cov-report=html --cov-report=term
+	pytest tests/ -v --cov=src --cov-report=html --cov-report=term-missing
 	@echo ""
 	@echo "Coverage report generated in htmlcov/index.html"
 	@echo ""
