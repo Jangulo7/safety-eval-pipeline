@@ -44,21 +44,21 @@ Clone the repository and create your environment file.
 git clone https://github.com/your-org/llm-nightly-eval.git
 cd llm-nightly-eval
 
-# Create the environment config (DO NOT COMMIT THIS FILE)
+### Create the environment config (DO NOT COMMIT THIS FILE)
 touch .env
 
 2. Environment VariablesPopulate .env with your credentials:
 
-# AWS Credentials (S3 Access)
+### AWS Credentials (S3 Access)
 AWS_ACCESS_KEY_ID=your_access_key_here
 AWS_SECRET_ACCESS_KEY=your_secret_key_here
 AWS_DEFAULT_REGION=us-east-1
 S3_MODEL_BUCKET=acme-llm-quantized-models
 
-# Alerting (Optional)
+### Alerting (Optional)
 ALERT_WEBHOOK_URL=https://hooks.slack.com/services/T000/B000/XXXX
 
-# Create the environment config (DO NOT COMMIT THIS FILE)
+### Create the environment config (DO NOT COMMIT THIS FILE)
 touch .env
 
 3. Launch the StackDeploy the pipeline in detached mode.
@@ -80,10 +80,10 @@ Drill-down: Click any model to see raw JSON outputs.
 Manual Trigger
 If you need to evaluate a specific model immediately (bypassing the cron schedule):
 
-# Enter the scheduler container
+### Enter the scheduler container
 docker-compose exec scheduler python
 
-# Inside Python shell:
+### Inside Python shell:
 from tasks import evaluate_model_task
 evaluate_model_task.delay("path/to/model_folder_in_s3")
 
