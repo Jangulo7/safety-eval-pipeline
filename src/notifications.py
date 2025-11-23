@@ -11,7 +11,7 @@ def send_alert(model_name: str, status: str, error_msg: str = None, run_time: st
         return
 
     is_failure = status == 'FAILURE'
-    emoji = "❌" if is_failure else "✅"
+    emoji = ":x:" if is_failure else ":white_check_mark:"
     color = "#FF0000" if is_failure else "#36a64f"
     
     text = f"{emoji} **Nightly Eval {status}:** {model_name}"

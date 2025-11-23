@@ -1,0 +1,30 @@
+# Development and Testing Dependencies
+
+# Code Formatting
+black==24.3.0
+isort==5.13.2
+
+# Linting
+flake8==7.0.0
+flake8-docstrings==1.7.0
+flake8-bugbear==24.2.6
+
+# Type Checking
+mypy==1.9.0
+types-redis
+types-requests
+types-boto3
+
+# Testing
+pytest==8.1.1
+pytest-cov==5.0.0
+pytest-mock==3.12.0
+pytest-asyncio==0.23.5
+
+# Test Utilities
+fakeredis==2.21.1
+moto==5.0.3  # Mock AWS services
+
+# Profiling
+py-spy==0.3.14
+memory-profiler==0.61.0

@@ -32,5 +32,5 @@ BENCHMARK_SUITE = [
 ]
 
 # Flags
-TRUST_REMOTE_CODE = True
+TRUST_REMOTE_CODE = False
 USE_CHAT_TEMPLATE = False # Set True if evaluating Instruct models as Chatbots
