@@ -1,7 +1,5 @@
-"""
-Pytest configuration and shared fixtures.
-"""
-import os
+"""Pytest configuration and shared fixtures."""
+
 import tempfile
 from unittest.mock import MagicMock, Mock
 
@@ -19,13 +17,13 @@ def temp_dir():
 def mock_s3_client():
     """Provide a mock S3 client."""
     mock_client = MagicMock()
-    
+
     # Mock common S3 operations
     mock_client.get_paginator.return_value = MagicMock()
     mock_client.download_file = MagicMock()
     mock_client.upload_file = MagicMock()
     mock_client.get_object = MagicMock()
-    
+
     return mock_client
 
 
@@ -33,10 +31,10 @@ def mock_s3_client():
 def mock_redis_client():
     """Provide a mock Redis client."""
     mock_client = MagicMock()
-    
+
     mock_client.sismember.return_value = False
     mock_client.sadd.return_value = 1
-    
+
     return mock_client
 
 
@@ -104,7 +102,7 @@ def sample_eval_config():
 def mock_config():
     """Provide a mock config module."""
     config = Mock()
-    
+
     config.S3_BUCKET_NAME = "test-bucket"
     config.S3_RESULTS_PREFIX = "results/"
     config.TEMP_MODEL_DIR = "/tmp/eval_models"
@@ -112,7 +110,7 @@ def mock_config():
     config.BENCHMARK_SUITE = ["task1|subtask|5|0", "task2|subtask|0|0"]
     config.TRUST_REMOTE_CODE = False
     config.USE_CHAT_TEMPLATE = False
-    
+
     return config
 
 
@@ -127,12 +125,12 @@ def setup_test_env(monkeypatch):
 def mock_gguf_reader():
     """Provide a mock GGUF reader."""
     mock_reader = MagicMock()
-    
+
     # Mock field structure
     mock_field = Mock()
     mock_field.key = "general.architecture"
     mock_field.parts = ["llama"]
-    
+
     mock_reader.fields = {"general.architecture": mock_field}
-    
+
     return mock_reader

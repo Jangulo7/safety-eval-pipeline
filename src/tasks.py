@@ -8,6 +8,7 @@ This module handles:
 - Uploading results
 - Cleanup operations
 """
+
 import glob
 import json
 import logging
@@ -15,18 +16,19 @@ import os
 import shutil
 import subprocess
 import time
-from typing import Optional, Tuple
+from typing import Tuple
 
 from celery import Celery
 
 # Local imports - adjusted for src/ structure
-import sys
+import sys  # noqa: E402
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-import config
-from aws_clients import get_s3_client  # Use shared client
-from collectors.master_collector import collect_evaluation_parameters
-from notifications import send_alert
+import config  # noqa: E402
+from aws_clients import get_s3_client  # noqa: E402
+from collectors.master_collector import collect_evaluation_parameters  # noqa: E402
+from notifications import send_alert  # noqa: E402
 
 app = Celery("ai_evaluator", broker="redis://redis:6379/0")
 
@@ -108,14 +110,10 @@ def detect_model_type_and_path(local_dir: str) -> Tuple[str, str]:
         logger.info("Detected Standard HuggingFace directory format.")
         return local_dir, "hf"
 
-    raise ValueError(
-        f"Could not identify model type in {local_dir} (No .gguf or config.json)"
-    )
+    raise ValueError(f"Could not identify model type in {local_dir} (No .gguf or config.json)")
 
 
-def run_lighteval_subprocess(
-    model_path: str, output_dir: str, model_type: str
-) -> str:
+def run_lighteval_subprocess(model_path: str, output_dir: str, model_type: str) -> str:
     """
     Run LightEval evaluation. Adapts arguments based on model type.
 
@@ -138,12 +136,17 @@ def run_lighteval_subprocess(
     trust_code = "True" if config.TRUST_REMOTE_CODE else "False"
     model_args = f"pretrained={model_path},trust_remote_code={trust_code}"
 
-    cmd.extend([
-        "--model_args", model_args,
-        "--tasks", tasks_str,
-        "--output_dir", output_dir,
-        "--save_details"
-    ])
+    cmd.extend(
+        [
+            "--model_args",
+            model_args,
+            "--tasks",
+            tasks_str,
+            "--output_dir",
+            output_dir,
+            "--save_details",
+        ]
+    )
 
     logger.info(f"Executing LightEval: {' '.join(cmd)}")
 
@@ -159,9 +162,7 @@ def run_lighteval_subprocess(
 
     if result.returncode != 0:
         logger.error(f"LightEval STDERR: {result.stderr}")
-        raise RuntimeError(
-            f"Evaluation process failed with code {result.returncode}"
-        )
+        raise RuntimeError(f"Evaluation process failed with code {result.returncode}")
 
     return result.stdout
 
@@ -170,6 +171,7 @@ def clear_gpu_cache() -> None:
     """Clear GPU cache to prevent OOM errors on subsequent runs."""
     try:
         import torch
+
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
             logger.info("GPU cache cleared")
@@ -180,7 +182,7 @@ def clear_gpu_cache() -> None:
 @app.task(bind=True, max_retries=1)
 def evaluate_model_task(self, s3_folder_prefix: str) -> None:
     """
-    Main Celery task for model evaluation.
+    Execute main Celery task for model evaluation.
 
     Downloads model from S3, runs benchmarks, collects metadata, and uploads results.
     Uses shared S3 client for better connection pooling performance.
@@ -206,9 +208,7 @@ def evaluate_model_task(self, s3_folder_prefix: str) -> None:
 
     try:
         # 1. Download Full Directory
-        download_s3_folder(
-            config.S3_BUCKET_NAME, s3_folder_prefix, local_model_dir
-        )
+        download_s3_folder(config.S3_BUCKET_NAME, s3_folder_prefix, local_model_dir)
 
         # 2. Detect Type (GGUF vs HF)
         target_path, model_type = detect_model_type_and_path(local_model_dir)
@@ -253,9 +253,7 @@ def evaluate_model_task(self, s3_folder_prefix: str) -> None:
 
         # 5. Upload Results
         if not os.path.exists(local_output_dir):
-            logger.warning(
-                f"Output directory {local_output_dir} was not created by LightEval."
-            )
+            logger.warning(f"Output directory {local_output_dir} was not created by LightEval.")
             send_alert(model_name, "FAILURE", error_msg="Output directory missing")
             return
 
@@ -277,9 +275,7 @@ def evaluate_model_task(self, s3_folder_prefix: str) -> None:
             send_alert(model_name, "SUCCESS", run_time=elapsed)
         else:
             logger.warning("No JSON/Parquet results found to upload.")
-            send_alert(
-                model_name, "FAILURE", error_msg="No results generated"
-            )
+            send_alert(model_name, "FAILURE", error_msg="No results generated")
 
     except Exception as e:
         logger.error(f"Task failed for {model_name}: {str(e)}")

@@ -1,25 +1,22 @@
-"""
-Unit tests for collectors module - Metadata extraction.
-"""
+"""Unit tests for collectors module - Metadata extraction."""
+
 import os
-import tempfile
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import patch
 
-import pytest
+import sys  # noqa: E402
 
-import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from src.collectors.master_collector import collect_evaluation_parameters
+from src.collectors.master_collector import collect_evaluation_parameters  # noqa: E402
 
 
 class TestMasterCollector:
     """Tests for master metadata collector."""
 
-    @patch("collectors.master_collector.get_tool_metadata")
-    @patch("collectors.master_collector.get_system_metadata")
-    @patch("collectors.master_collector.get_gguf_metadata")
-    @patch("collectors.master_collector.calculate_sha256")
+    @patch("src.collectors.master_collector.get_tool_metadata")
+    @patch("src.collectors.master_collector.get_system_metadata")
+    @patch("src.collectors.master_collector.get_gguf_metadata")
+    @patch("src.collectors.master_collector.calculate_sha256")
     def test_collect_full_metadata(
         self,
         mock_hash,
@@ -54,9 +51,9 @@ class TestMasterCollector:
         assert "eval_tool_version" in result  # From tool
         assert "file_hash_sha256" in result
 
-    @patch("collectors.master_collector.get_tool_metadata")
-    @patch("collectors.master_collector.get_system_metadata")
-    @patch("collectors.master_collector.get_gguf_metadata")
+    @patch("src.collectors.master_collector.get_tool_metadata")
+    @patch("src.collectors.master_collector.get_system_metadata")
+    @patch("src.collectors.master_collector.get_gguf_metadata")
     def test_collect_without_model_path(
         self,
         mock_gguf,
@@ -87,10 +84,10 @@ class TestMasterCollector:
         assert result["run_id"] == "test_123"
         assert result["model_id"] == "test-model"
 
-    @patch("collectors.master_collector.get_tool_metadata")
-    @patch("collectors.master_collector.get_system_metadata")
-    @patch("collectors.master_collector.get_gguf_metadata")
-    @patch("collectors.master_collector.calculate_sha256")
+    @patch("src.collectors.master_collector.get_tool_metadata")
+    @patch("src.collectors.master_collector.get_system_metadata")
+    @patch("src.collectors.master_collector.get_gguf_metadata")
+    @patch("src.collectors.master_collector.calculate_sha256")
     def test_collect_with_chat_template_missing(
         self,
         mock_hash,
@@ -122,10 +119,10 @@ class TestMasterCollector:
         assert "RISK_FLAG" in result
         assert result["RISK_FLAG"] == "MISSING_CHAT_TEMPLATE"
 
-    @patch("collectors.master_collector.get_tool_metadata")
-    @patch("collectors.master_collector.get_system_metadata")
-    @patch("collectors.master_collector.get_gguf_metadata")
-    @patch("collectors.master_collector.calculate_sha256")
+    @patch("src.collectors.master_collector.get_tool_metadata")
+    @patch("src.collectors.master_collector.get_system_metadata")
+    @patch("src.collectors.master_collector.get_gguf_metadata")
+    @patch("src.collectors.master_collector.calculate_sha256")
     def test_collect_with_reproducibility_defaults(
         self,
         mock_hash,
@@ -156,7 +153,7 @@ class TestMasterCollector:
         assert result["random_seed"] == 42
         assert result["batch_size"] == 1
 
-    @patch("collectors.master_collector.calculate_sha256")
+    @patch("src.collectors.master_collector.calculate_sha256")
     def test_collect_with_hash_failure(
         self,
         mock_hash,
@@ -170,7 +167,7 @@ class TestMasterCollector:
             with patch("collectors.master_collector.get_system_metadata"):
                 with patch("collectors.master_collector.get_tool_metadata"):
                     mock_gguf.return_value = {"valid_gguf": True}
-                    
+
                     result = collect_evaluation_parameters(sample_eval_config)
 
                     # Should not have hash in result

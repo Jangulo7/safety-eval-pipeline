@@ -5,6 +5,7 @@ This module provides singleton instances of AWS clients to avoid
 creating new connections for every operation, which improves performance
 and reduces connection overhead.
 """
+
 import logging
 from typing import Optional
 

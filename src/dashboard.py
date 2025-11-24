@@ -8,10 +8,11 @@ Features:
 - Caching for performance
 - Export functionality
 """
+
 import json
 import os
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional
+from typing import Optional
 
 import altair as alt
 import pandas as pd
@@ -19,18 +20,17 @@ import streamlit as st
 from botocore.exceptions import ClientError
 
 # Use shared client
-import sys
+import sys  # noqa: E402
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-from aws_clients import get_s3_client
+from aws_clients import get_s3_client  # noqa: E402
 
 st.set_page_config(layout="wide", page_title="AI Eval Dashboard")
 
 
 @st.cache_data(ttl=300)  # Cache for 5 minutes
 def load_data_paginated(
-    max_results: int = 100,
-    days_back: int = 30,
-    model_filter: Optional[str] = None
+    max_results: int = 100, days_back: int = 30, model_filter: Optional[str] = None
 ) -> pd.DataFrame:
     """
     Load evaluation results with pagination and filtering.
@@ -51,7 +51,7 @@ def load_data_paginated(
         st.error("S3_MODEL_BUCKET environment variable not set")
         return pd.DataFrame()
 
-    data = []
+    data: list = []
     cutoff_date = datetime.now() - timedelta(days=days_back)
 
     try:
@@ -177,9 +177,7 @@ def display_leaderboard(df: pd.DataFrame):
 
         # Format for display
         st.dataframe(
-            leaderboard.style.background_gradient(
-                subset=["avg_score"], cmap="RdYlGn"
-            ),
+            leaderboard.style.background_gradient(subset=["avg_score"], cmap="RdYlGn"),
             use_container_width=True,
             height=400,
         )
@@ -188,7 +186,7 @@ def display_leaderboard(df: pd.DataFrame):
 
 
 def main():
-    """Main dashboard application."""
+    """Run the main dashboard application."""
     st.title("LLM Evaluation Dashboard")
 
     # Sidebar filters
@@ -309,11 +307,13 @@ def main():
             chart_data = []
             for _, row in top_models.iterrows():
                 for col in numeric_cols:
-                    chart_data.append({
-                        "Model": row["model"],
-                        "Benchmark": col,
-                        "Score": row[col],
-                    })
+                    chart_data.append(
+                        {
+                            "Model": row["model"],
+                            "Benchmark": col,
+                            "Score": row[col],
+                        }
+                    )
 
             chart_df = pd.DataFrame(chart_data)
 

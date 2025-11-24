@@ -4,6 +4,7 @@ Scheduler for LLM evaluation pipeline.
 Scans S3 for new models and triggers evaluation tasks.
 Uses shared S3 client for better connection pooling.
 """
+
 import logging
 import os
 from datetime import datetime, timedelta, timezone
@@ -12,12 +13,13 @@ from typing import List
 import redis
 
 # Local imports
-import sys
+import sys  # noqa: E402
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from aws_clients import get_s3_client  # Use shared client
-from tasks import evaluate_model_task
-import config
+from aws_clients import get_s3_client  # noqa: E402
+from tasks import evaluate_model_task  # noqa: E402
+import config  # noqa: E402
 
 # Configure Logging
 logging.basicConfig(
@@ -78,9 +80,7 @@ def get_new_model_folders(bucket_name: str, hours: int = 24) -> List[str]:
                     # If folder_prefix is empty, the file is at bucket root.
                     # Downloading root ('/') would download the ENTIRE bucket.
                     if not folder_prefix:
-                        logger.warning(
-                            f"Skipping root-level file '{key}' to prevent bucket dump."
-                        )
+                        logger.warning(f"Skipping root-level file '{key}' to prevent bucket dump.")
                         continue
 
                     folder_prefix = folder_prefix + "/"

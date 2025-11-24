@@ -1,16 +1,18 @@
+"""Tool profiling utilities for capturing code and library versions."""
+
 import git
 import importlib.metadata
 import os
 import logging
+from typing import Optional, Dict, Any
 
 logger = logging.getLogger(__name__)
 
-def get_tool_metadata(repo_path: str = None):
-    """
-    Captures the version of the code and critical libraries used in this run.
-    """
-    meta = {}
-    
+
+def get_tool_metadata(repo_path: Optional[str] = None) -> Dict[str, Any]:
+    """Capture the version of the code and critical libraries used in this run."""
+    meta: Dict[str, Any] = {}
+
     # 1. Automatic Repo Path Detection
     # Go up 3 levels from: src/collectors/tool_profiler.py -> project_root/
     if repo_path is None:
@@ -21,22 +23,22 @@ def get_tool_metadata(repo_path: str = None):
         repo = git.Repo(repo_path)
         meta["eval_tool_commit_hash"] = repo.head.object.hexsha
         meta["eval_tool_branch"] = repo.active_branch.name
-    except Exception as e:
-        # This often happens inside Docker if .git folder isn't copied. 
+    except Exception:
+        # This often happens inside Docker if .git folder isn't copied.
         # That's okay, we just log it.
         meta["git_error"] = "Git metadata unavailable (no .git folder found)"
 
     # 3. Get Python Package Versions
     # Updated to track 'lighteval' since that is what tasks.py uses
-    packages_to_track = ['lighteval', 'torch', 'transformers', 'accelerate', 'huggingface_hub']
-    
-    package_versions = {}
+    packages_to_track = ["lighteval", "torch", "transformers", "accelerate", "huggingface_hub"]
+
+    package_versions: dict[str, str] = {}
     for pkg in packages_to_track:
         try:
             package_versions[pkg] = importlib.metadata.version(pkg)
         except importlib.metadata.PackageNotFoundError:
             package_versions[pkg] = "Not Installed"
-            
+
     meta["python_package_versions"] = package_versions
 
     # 4. Main Tool Version (LightEval)

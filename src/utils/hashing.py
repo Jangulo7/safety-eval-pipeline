@@ -3,6 +3,7 @@ File integrity utilities for ISO 27001 compliance.
 
 Provides SHA256 hashing functionality for model file verification.
 """
+
 import hashlib
 import logging
 from typing import Optional

@@ -1,3 +1,5 @@
+"""Configuration settings for the LLM evaluation pipeline."""
+
 import os
 
 # S3 Settings
@@ -17,20 +19,16 @@ GPU_IDS = "0"
 BENCHMARK_SUITE = [
     # 1. MMLU (General Knowledge) - 5-shot is standard
     "leaderboard|mmlu:major|5|0",
-    
     # 2. GSM8K (Math Reasoning) - 5-shot is standard
     "leaderboard|gsm8k|5|0",
-    
     # 3. HumanEval (Coding) - 0-shot is standard
     "leaderboard|humaneval|0|0",
-    
     # 4. HellaSwag (Common Sense/Reasoning) - 10-shot is standard
     "leaderboard|hellaswag|10|0",
-    
     # 5. ARC Challenge (Reasoning) - 25-shot is standard
-    "leaderboard|arc:challenge|25|0"
+    "leaderboard|arc:challenge|25|0",
 ]
 
 # Flags
 TRUST_REMOTE_CODE = False
-USE_CHAT_TEMPLATE = False # Set True if evaluating Instruct models as Chatbots
+USE_CHAT_TEMPLATE = False  # Set True if evaluating Instruct models as Chatbots
