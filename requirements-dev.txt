@@ -12,7 +12,12 @@ fakeredis>=2.20
 moto>=5.0
 
 # Lint and types
+#
+# Every dependency carries a lower bound. Without one, pip backtracks through the whole
+# release history of a package looking for a compatible set and gives up with
+# `resolution-too-deep` -- which is how CI failed on `types-requests` before these bounds
+# existed. Stub packages are the usual culprit: they have many releases and loose metadata.
 ruff>=0.6
 mypy>=1.10
-types-requests
-types-PyYAML
+types-requests>=2.31
+types-PyYAML>=6.0

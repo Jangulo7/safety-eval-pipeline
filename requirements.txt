@@ -27,6 +27,13 @@ streamlit>=1.40
 # AWS S3 artifact store (the model watcher)
 boto3>=1.34
 
+# Not used directly. inspect_ai reaches S3 log storage through s3fs, which depends on
+# aiobotocore, and aiobotocore pins narrow botocore ranges that fight boto3's own. Without a
+# lower bound pip backtracks through hundreds of aiobotocore releases and aborts with
+# `resolution-too-deep` -- which is exactly how CI failed. The bound is a resolver hint, not
+# a functional requirement.
+aiobotocore>=2.15
+
 # The original watcher/queue, retained from the pre-Inspect pipeline
 celery>=5.3
 redis>=5.0
