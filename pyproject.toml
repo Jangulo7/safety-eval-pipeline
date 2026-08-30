@@ -7,7 +7,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "safety-eval-pipeline"
 version = "2.0.0"
-description = "Automated safety benchmarking with a release gate: runs AISI Inspect safety tasks across providers, compares them, and fails the build on a threshold breach."
+description = "Runs AISI Inspect safety benchmarks across several models under identical conditions, reports each benchmark and category separately, and fails the build on a threshold breach."
 requires-python = ">=3.11"
 readme = "README.md"
 license = {text = "MIT"}

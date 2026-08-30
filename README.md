@@ -1,24 +1,47 @@
-# Safety Eval Pipeline
+# safety-eval-pipeline
 
 [![CI](https://github.com/Jangulo7/safety-eval-pipeline/actions/workflows/ci.yml/badge.svg)](https://github.com/Jangulo7/safety-eval-pipeline/actions/workflows/ci.yml)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-**Automated safety benchmarking with a release gate** — watches an artifact store for new
-model artefacts, runs [AISI Inspect](https://inspect.aisi.org.uk/) safety tasks across
-providers, writes a ranked leaderboard, charts and a PDF report, and **fails the build when
-a threshold is breached**.
+**Runs [AISI Inspect](https://inspect.aisi.org.uk/) safety benchmarks across several models
+under identical conditions, then fails the build when a model breaches a threshold.**
+
+The pipeline evaluates every model on the same items, with the same generation parameters
+and the same grader, and records what it did. It reports each benchmark separately and
+breaks every score down by the dataset's own categories. Models rank by how many thresholds
+they violate, never by a composite score.
+
+Models run locally through vLLM, or through any provider Inspect supports. A Streamlit
+dashboard drives the same code as the command line.
 
 ```bash
 make install          # venv + pinned dependencies
 cp .env.example .env  # add OPENROUTER_API_KEY (and HF_TOKEN for XSTest)
-make doctor           # preflight: credentials, gated datasets, metric-name drift
-make dry-run          # print every cell that would run — costs nothing
-make run              # run the matrix, render every report, gate the result
-make ui               # or drive it from the Streamlit dashboard
+make doctor           # preflight: credentials, gated datasets, metric drift
+make check            # reproducibility gate: will these numbers be comparable?
+make dry-run          # print every cell it would run, at no cost
+make run              # run, report, gate
+make ui               # or use the dashboard
 ```
 
+## Reports
 
+From the published run: three open-weight models, three safety benchmarks, three of four
+tasks at full dataset.
+
+| artefact | contents |
+|---|---|
+| [**`leaderboard.html`**](results/published/leaderboard.html) | Ranking by violated thresholds. Per-category score tables, the four charts, every benchmark explained with its metrics and known traps, contamination disclosure, parameter register, full provenance. Self-contained: no network needed. |
+| [**`report.pdf`**](results/published/report.pdf) | The same evidence for printing, with one page per benchmark covering what it measures, what it does not, and how to read the result. |
+| [**`gate_report.md`**](results/published/gate_report.md) | Each threshold, the observed value, the worst category, and pass or fail. |
+| [**`results.md`**](results/published/results.md) | Every score with its interval, sample counts, run conditions and both disclosure tables. |
+| [**`results.json`**](results/published/results.json) | The record every artefact renders from. |
+| [**`charts/`**](results/published/charts) | `calibration.png` plots over-refusal against under-refusal; `metric_grid.png` shows each metric in native units; `coverage.png` shows scored, unscored and failed samples. |
+
+> **Provenance.** Built Nov 2025 around `lighteval` and capability benchmarks. Rebuilt on the
+> AISI Inspect harness in Aug 2026. Git history is intact; `v0.1-pre-inspect` tags the
+> pre-Inspect head.
 
 ---
 

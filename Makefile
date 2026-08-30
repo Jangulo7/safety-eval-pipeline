@@ -1,4 +1,4 @@
-.PHONY: help install doctor dry-run run report gate ui test test-all lint format typecheck clean
+.PHONY: help install doctor check dry-run run report gate ui test test-all lint format typecheck clean
 
 PY ?= .venv/bin/python
 PYTHONPATH := src
@@ -7,7 +7,8 @@ help:
 	@echo "Safety Eval Pipeline — AISI Inspect safety benchmarks with a release gate"
 	@echo
 	@echo "  make install    Create .venv and install runtime + dev dependencies"
-	@echo "  make doctor     Preflight: credentials, gated datasets, metric-name drift"
+	@echo "  make doctor     Preflight: credentials, gated datasets, metric drift"
+	@echo "  make check      Reproducibility gate: will these numbers be comparable?"
 	@echo "  make dry-run    Print every cell that would run. Costs nothing."
 	@echo "  make run        Run the matrix, render every report, then gate (exit 1 on breach)"
 	@echo "  make report     Re-render reports from the latest results.json (no provider calls)"
@@ -29,6 +30,9 @@ install:
 
 doctor:
 	PYTHONPATH=$(PYTHONPATH) $(PY) -m safety_eval.cli doctor --metrics
+
+check:
+	PYTHONPATH=$(PYTHONPATH) $(PY) -m safety_eval.cli check
 
 dry-run:
 	PYTHONPATH=$(PYTHONPATH) $(PY) -m safety_eval.cli run --dry-run
