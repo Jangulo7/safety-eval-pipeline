@@ -7,19 +7,18 @@ Uses shared S3 client for better connection pooling.
 
 import logging
 import os
-from datetime import datetime, timedelta, timezone
-from typing import List
+
+# Local imports
+import sys
+from datetime import UTC, datetime, timedelta
 
 import redis
 
-# Local imports
-import sys  # noqa: E402
-
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from aws_clients import get_s3_client  # noqa: E402
-from tasks import evaluate_model_task  # noqa: E402
-import config  # noqa: E402
+import config
+from aws_clients import get_s3_client
+from tasks import evaluate_model_task
 
 # Configure Logging
 logging.basicConfig(
@@ -33,7 +32,7 @@ redis_client = redis.Redis(host="redis", port=6379, db=1)
 PROCESSED_SET_KEY = "processed_models_history"
 
 
-def get_new_model_folders(bucket_name: str, hours: int = 24) -> List[str]:
+def get_new_model_folders(bucket_name: str, hours: int = 24) -> list[str]:
     """
     Scan S3 for 'folders' (prefixes) modified in the last N hours.
 
@@ -51,7 +50,7 @@ def get_new_model_folders(bucket_name: str, hours: int = 24) -> List[str]:
         >>> print(folders)
         ['models/llama-3-8b/', 'models/mistral-7b/']
     """
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+    cutoff = datetime.now(UTC) - timedelta(hours=hours)
     candidates = set()
 
     # Use shared S3 client

@@ -7,7 +7,6 @@ and reduces connection overhead.
 """
 
 import logging
-from typing import Optional
 
 import boto3
 from botocore.config import Config
@@ -19,7 +18,7 @@ _s3_client = None
 _s3_resource = None
 
 
-def get_s3_client(region_name: Optional[str] = None):
+def get_s3_client(region_name: str | None = None):
     """
     Get a shared S3 client instance with connection pooling.
 
@@ -57,7 +56,7 @@ def get_s3_client(region_name: Optional[str] = None):
     return _s3_client
 
 
-def get_s3_resource(region_name: Optional[str] = None):
+def get_s3_resource(region_name: str | None = None):
     """
     Get a shared S3 resource instance with connection pooling.
 

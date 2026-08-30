@@ -7,13 +7,14 @@ conventions across different model architectures (Llama, Qwen, etc.).
 UPDATED: Now includes rope_scaling and group_size extraction.
 """
 
-import gguf
-import os
 import logging
-from typing import Dict, Any
+import os
+from typing import Any
+
+import gguf
 
 
-def get_gguf_metadata(file_path: str) -> Dict[str, Any]:
+def get_gguf_metadata(file_path: str) -> dict[str, Any]:
     """
     Robustly extracts metadata from GGUF files.
 
@@ -38,7 +39,7 @@ def get_gguf_metadata(file_path: str) -> Dict[str, Any]:
     try:
         reader = gguf.GGUFReader(file_path)
         # Convert all keys to a standard dict for easier searching
-        raw_meta: Dict[str, Any] = {}
+        raw_meta: dict[str, Any] = {}
         for field in reader.fields.values():
             if hasattr(field, "parts") and field.parts:
                 # Access key through the field's name attribute
@@ -133,7 +134,7 @@ def get_gguf_metadata(file_path: str) -> Dict[str, Any]:
             10: 32,  # Q8_0
         }
 
-        group_size = group_size_map.get(file_type_code, None)
+        group_size = group_size_map.get(file_type_code)
 
         # Try to find explicit group_size in metadata
         explicit_group_size = find_val(".group_size")
@@ -186,7 +187,7 @@ def get_gguf_metadata(file_path: str) -> Dict[str, Any]:
         return {"error": str(e), "valid_gguf": False}
 
 
-def get_tensor_info(file_path: str) -> Dict[str, Any]:
+def get_tensor_info(file_path: str) -> dict[str, Any]:
     """
     Extract detailed tensor information from GGUF file.
 
@@ -212,7 +213,7 @@ def get_tensor_info(file_path: str) -> Dict[str, Any]:
         num_tensors = len(tensors)
 
         # Analyze quantization types
-        quant_types: Dict[str, int] = {}
+        quant_types: dict[str, int] = {}
         for tensor in tensors:
             tensor_type = str(tensor.tensor_type)
             quant_types[tensor_type] = quant_types.get(tensor_type, 0) + 1
@@ -269,4 +270,4 @@ def validate_gguf_file(file_path: str) -> tuple[bool, str]:
         return True, "Valid GGUF file"
 
     except Exception as e:
-        return False, f"Failed to read GGUF: {str(e)}"
+        return False, f"Failed to read GGUF: {e!s}"

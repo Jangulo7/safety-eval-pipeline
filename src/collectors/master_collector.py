@@ -8,15 +8,16 @@ UPDATED VERSION: Now includes ALL parameters from register table.
 """
 
 import datetime
-from typing import Any, Dict
+from typing import Any
+
+from utils.hashing import calculate_sha256
 
 from .gguf_parser import get_gguf_metadata
 from .system_profiler import get_system_metadata
 from .tool_profiler import get_tool_metadata
-from utils.hashing import calculate_sha256
 
 
-def collect_evaluation_parameters(config: Dict[str, Any]) -> Dict[str, Any]:
+def collect_evaluation_parameters(config: dict[str, Any]) -> dict[str, Any]:
     """
     Collect all evaluation parameters and metadata - COMPLETE VERSION.
 
@@ -78,7 +79,7 @@ def collect_evaluation_parameters(config: Dict[str, Any]) -> Dict[str, Any]:
     # ========================================================================
     # SECTION A: MODEL IDENTITY & RUN METADATA
     # ========================================================================
-    eval_meta: Dict[str, Any] = {
+    eval_meta: dict[str, Any] = {
         "run_id": config.get("run_id"),
         "timestamp_utc": datetime.datetime.utcnow().isoformat(),
         "model_id": config.get("model_id", "unknown"),
@@ -168,7 +169,7 @@ def collect_evaluation_parameters(config: Dict[str, Any]) -> Dict[str, Any]:
 # ============================================================================
 # HELPER FUNCTION: Validate Required Fields
 # ============================================================================
-def validate_metadata(metadata: Dict[str, Any]) -> tuple[bool, list[str]]:
+def validate_metadata(metadata: dict[str, Any]) -> tuple[bool, list[str]]:
     """
     Validate that all critical fields are present in metadata.
 
@@ -203,7 +204,7 @@ def validate_metadata(metadata: Dict[str, Any]) -> tuple[bool, list[str]]:
 # ============================================================================
 # HELPER FUNCTION: Get Parameter Summary
 # ============================================================================
-def get_parameter_summary(metadata: Dict[str, Any]) -> Dict[str, int]:
+def get_parameter_summary(metadata: dict[str, Any]) -> dict[str, int]:
     """
     Get a summary count of parameters by category.
 

@@ -1,21 +1,32 @@
-boto3
-redis>=5.0.0
-celery[redis]
-streamlit
-pandas
-altair
-requests
-# LightEval and Core ML
-git+https://github.com/huggingface/lighteval.git
-accelerate
-bitsandbytes
-scipy
-sentencepiece
-protobuf
-# Optional: GGUF support
-auto-gptq
-# Collector requirements
-gguf>=0.6.0
-nvidia-ml-py
-psutil
-gitpython
+# Runtime dependencies. Exact pins for the eval harness, because a score is a joint property
+# of the model and the harness: an inspect_evals upgrade that changes a scorer changes the
+# number. The resolved versions are recorded in the README and in config/benchmarks.yaml.
+inspect_ai==0.3.260
+inspect_evals==0.18.0
+
+# Configuration and data
+python-dotenv>=1.0
+pyyaml>=6.0
+pydantic>=2.7
+pandas>=2.0
+requests>=2.31
+
+# Reporting
+matplotlib>=3.8
+reportlab>=4.0
+jinja2>=3.1
+pillow>=10.0
+
+# Dashboard
+streamlit>=1.40
+
+# AWS S3 artifact store (the model watcher)
+boto3>=1.34
+
+# The original watcher/queue, retained from the pre-Inspect pipeline
+celery>=5.3
+redis>=5.0
+psutil>=5.9
+gguf>=0.10
+nvidia-ml-py>=12.0
+gitpython>=3.1

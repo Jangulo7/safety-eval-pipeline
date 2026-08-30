@@ -6,12 +6,11 @@ Provides SHA256 hashing functionality for model file verification.
 
 import hashlib
 import logging
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
 
-def calculate_sha256(file_path: str, chunk_size: int = 8192) -> Optional[str]:
+def calculate_sha256(file_path: str, chunk_size: int = 8192) -> str | None:
     """
     Calculate SHA256 hash of a file in chunks to handle large model files.
 

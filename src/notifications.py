@@ -1,16 +1,16 @@
 """Notification utilities for sending alerts via webhooks."""
 
-import os
 import logging
+import os
+
 import requests
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 WEBHOOK_URL = os.getenv("ALERT_WEBHOOK_URL")
 
 
 def send_alert(
-    model_name: str, status: str, error_msg: Optional[str] = None, run_time: str = "N/A"
+    model_name: str, status: str, error_msg: str | None = None, run_time: str = "N/A"
 ):
     """Send alert notification via webhook with model evaluation status."""
     if not WEBHOOK_URL:

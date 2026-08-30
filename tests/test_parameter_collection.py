@@ -3,17 +3,18 @@
 Tests all new parameters added in the COMPLETE version of master_collector.py
 """
 
-import pytest
-import sys  # noqa: E402
 import os
+import sys
+
+import pytest
 
 # Add src to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from src.collectors.master_collector import (  # noqa: E402
+from src.collectors.master_collector import (
     collect_evaluation_parameters,
-    validate_metadata,
     get_parameter_summary,
+    validate_metadata,
 )
 
 

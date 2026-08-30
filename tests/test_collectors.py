@@ -1,13 +1,12 @@
 """Unit tests for collectors module - Metadata extraction."""
 
 import os
+import sys
 from unittest.mock import patch
-
-import sys  # noqa: E402
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from src.collectors.master_collector import collect_evaluation_parameters  # noqa: E402
+from src.collectors.master_collector import collect_evaluation_parameters
 
 
 class TestMasterCollector:

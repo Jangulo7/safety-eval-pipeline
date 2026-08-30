@@ -5,10 +5,12 @@ venv/
 env/
 ENV/
 
-# Environment variables
+# Environment variables. .env.example is the committed template and must survive
+# the wildcards above it, so the negation comes last.
 .env
 .env.*
 *.env
+!.env.example
 
 # Python cache
 __pycache__/
@@ -26,3 +28,15 @@ __pycache__/
 # OS files
 .DS_Store
 Thumbs.db
+
+# Private working notes
+.private/
+
+# Inspect logs. StrongREJECT transcripts contain harmful completions and are NEVER
+# committed — see docs/SPEC.md §9.
+logs/strong_reject/
+logs/**/*.eval
+
+# Run outputs (regenerable from results.json); committed results live in results/published/
+results/*/
+!results/published/

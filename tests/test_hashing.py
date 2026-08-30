@@ -1,12 +1,11 @@
 """Unit tests for utils/hashing.py - File integrity utilities."""
 
 import os
-
-import sys  # noqa: E402
+import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from src.utils.hashing import calculate_sha256, verify_hash  # noqa: E402
+from src.utils.hashing import calculate_sha256, verify_hash
 
 
 class TestCalculateSHA256:

@@ -1,3 +1,13 @@
+"""Pytest fixtures.
+
+The pre-existing fixtures below serve the S3 watcher and collector tests, which the
+Inspect harness swap left untouched. Fixtures for the new pipeline live in
+``conftest_safety`` and are re-exported here so both suites share one conftest.
+"""
+
+from conftest_safety import *
+from conftest_safety import make_log, make_sample, make_score  # noqa: F401
+
 """Pytest configuration and shared fixtures."""
 
 import tempfile

@@ -1,17 +1,18 @@
 """Tool profiling utilities for capturing code and library versions."""
 
-import git
 import importlib.metadata
-import os
 import logging
-from typing import Optional, Dict, Any
+import os
+from typing import Any
+
+import git
 
 logger = logging.getLogger(__name__)
 
 
-def get_tool_metadata(repo_path: Optional[str] = None) -> Dict[str, Any]:
+def get_tool_metadata(repo_path: str | None = None) -> dict[str, Any]:
     """Capture the version of the code and critical libraries used in this run."""
-    meta: Dict[str, Any] = {}
+    meta: dict[str, Any] = {}
 
     # 1. Automatic Repo Path Detection
     # Go up 3 levels from: src/collectors/tool_profiler.py -> project_root/

@@ -1,10 +1,9 @@
 """Unit tests for scheduler.py - S3 scanning and task triggering."""
 
 import os
-from datetime import datetime, timedelta, timezone
-from unittest.mock import MagicMock, patch
-
 import sys
+from datetime import UTC, datetime, timedelta
+from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
@@ -22,8 +21,8 @@ class TestScheduler:
         mock_config.S3_RESULTS_PREFIX = "results/"
 
         # Mock S3 response
-        recent_time = datetime.now(timezone.utc) - timedelta(hours=12)
-        old_time = datetime.now(timezone.utc) - timedelta(hours=48)
+        recent_time = datetime.now(UTC) - timedelta(hours=12)
+        old_time = datetime.now(UTC) - timedelta(hours=48)
 
         mock_s3 = MagicMock()
         mock_get_s3.return_value = mock_s3
@@ -67,7 +66,7 @@ class TestScheduler:
 
         mock_config.S3_RESULTS_PREFIX = "results/"
 
-        recent_time = datetime.now(timezone.utc) - timedelta(hours=12)
+        recent_time = datetime.now(UTC) - timedelta(hours=12)
 
         mock_s3 = MagicMock()
         mock_get_s3.return_value = mock_s3

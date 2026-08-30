@@ -5,14 +5,62 @@ requires = ["setuptools>=45", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "llm-nightly-eval"
-version = "1.0.0"
-description = "LLM Model Evaluation Pipeline"
-requires-python = ">=3.8"
+name = "safety-eval-pipeline"
+version = "2.0.0"
+description = "Automated safety benchmarking with a release gate: runs AISI Inspect safety tasks across providers, compares them, and fails the build on a threshold breach."
+requires-python = ">=3.11"
 readme = "README.md"
+license = {text = "MIT"}
+authors = [{name = "Johanna Angulo"}]
+keywords = ["evals", "ai-safety", "inspect-ai", "benchmarking", "llm"]
+
+[project.scripts]
+safety-eval = "safety_eval.cli:main"
+
+[project.urls]
+Repository = "https://github.com/Jangulo7/safety-eval-pipeline"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["safety_eval*"]
+
+[tool.setuptools.package-data]
+safety_eval = ["reporting/templates/*.j2"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests", "app"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM", "RUF"]
+ignore = [
+    "E501",    # line length is enforced by the formatter, not the linter
+    "B008",    # function call in default argument: intentional for Depends-style defaults
+    "SIM108",  # ternaries are not always more readable than an if/else
+    "RUF001",  # en-dashes, × and · are deliberate in user-facing strings and captions
+    "RUF002",
+    "RUF003",
+    "RUF005",  # list concatenation reads better than unpacking when building table rows
+    "UP042",   # str + Enum is intentional: it keeps enums JSON-serialisable in results.json
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["E402", "F403", "F405"]
+# The pre-Inspect watcher/collector modules and their tests are untouched by the harness
+# swap. Re-styling them would bury the swap in unrelated diff noise, so the newer stylistic
+# rules are not applied to them.
+"src/tasks.py" = ["B904"]
+"src/scheduler.py" = ["SIM102"]
+"tests/test_tasks.py" = ["SIM117"]
+"tests/test_collectors.py" = ["SIM117"]
+"app/*" = ["E402"]                    # sys.path setup must precede the package imports
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# `src` so the package imports without an editable install; `tests` so conftest_safety and
+# the fixture factory resolve as top-level modules despite tests/ being a package.
+pythonpath = ["src", "tests", "."]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
@@ -26,8 +74,9 @@ addopts = [
 ]
 markers = [
     "unit: Unit tests",
-    "integration: Integration tests",
+    "integration: Integration tests (hit a real provider; excluded from CI)",
     "slow: Tests that take more than 5 seconds",
+    "harness: Exercise the installed inspect_ai / inspect_evals (no network, no provider)",
 ]
 
 [tool.coverage.run]

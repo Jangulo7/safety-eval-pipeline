@@ -15,20 +15,19 @@ import logging
 import os
 import shutil
 import subprocess
+
+# Local imports - adjusted for src/ structure
+import sys
 import time
-from typing import Tuple
 
 from celery import Celery
 
-# Local imports - adjusted for src/ structure
-import sys  # noqa: E402
-
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-import config  # noqa: E402
-from aws_clients import get_s3_client  # noqa: E402
-from collectors.master_collector import collect_evaluation_parameters  # noqa: E402
-from notifications import send_alert  # noqa: E402
+import config
+from aws_clients import get_s3_client
+from collectors.master_collector import collect_evaluation_parameters
+from notifications import send_alert
 
 app = Celery("ai_evaluator", broker="redis://redis:6379/0")
 
@@ -86,7 +85,7 @@ def download_s3_folder(bucket: str, s3_folder_prefix: str, local_dir: str) -> No
     logger.info(f"Downloaded {files_downloaded} files.")
 
 
-def detect_model_type_and_path(local_dir: str) -> Tuple[str, str]:
+def detect_model_type_and_path(local_dir: str) -> tuple[str, str]:
     """
     Determine if we are dealing with a GGUF file or a HuggingFace directory.
 
@@ -278,7 +277,7 @@ def evaluate_model_task(self, s3_folder_prefix: str) -> None:
             send_alert(model_name, "FAILURE", error_msg="No results generated")
 
     except Exception as e:
-        logger.error(f"Task failed for {model_name}: {str(e)}")
+        logger.error(f"Task failed for {model_name}: {e!s}")
         send_alert(model_name, "FAILURE", error_msg=str(e))
         raise self.retry(exc=e)
 

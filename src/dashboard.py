@@ -11,26 +11,25 @@ Features:
 
 import json
 import os
+
+# Use shared client
+import sys
 from datetime import datetime, timedelta
-from typing import Optional
 
 import altair as alt
 import pandas as pd
 import streamlit as st
 from botocore.exceptions import ClientError
 
-# Use shared client
-import sys  # noqa: E402
-
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-from aws_clients import get_s3_client  # noqa: E402
+from aws_clients import get_s3_client
 
 st.set_page_config(layout="wide", page_title="AI Eval Dashboard")
 
 
 @st.cache_data(ttl=300)  # Cache for 5 minutes
 def load_data_paginated(
-    max_results: int = 100, days_back: int = 30, model_filter: Optional[str] = None
+    max_results: int = 100, days_back: int = 30, model_filter: str | None = None
 ) -> pd.DataFrame:
     """
     Load evaluation results with pagination and filtering.

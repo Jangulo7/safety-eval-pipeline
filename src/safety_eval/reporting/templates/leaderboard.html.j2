@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="en" data-theme="{{ theme }}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ index_name }} — {{ run_id }}</title>
+<style>
+:root{
+  color-scheme: light;
+  --surface:#fcfcfb; --page:#f9f9f7; --ink:#0b0b0b; --ink-2:#52514e; --ink-muted:#898781;
+  --grid:#e1e0d9; --axis:#c3c2b7; --border:rgba(11,11,11,.10);
+  --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a;
+  --good:#0ca30c; --warn:#fab219; --serious:#ec835a; --critical:#d03b3b;
+  --radius:10px;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    color-scheme: dark;
+    --surface:#1a1a19; --page:#0d0d0d; --ink:#fff; --ink-2:#c3c2b7; --ink-muted:#898781;
+    --grid:#2c2c2a; --axis:#383835; --border:rgba(255,255,255,.10);
+    --s1:#3987e5; --s2:#d95926; --s3:#199e70;
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme: dark;
+  --surface:#1a1a19; --page:#0d0d0d; --ink:#fff; --ink-2:#c3c2b7; --ink-muted:#898781;
+  --grid:#2c2c2a; --axis:#383835; --border:rgba(255,255,255,.10);
+  --s1:#3987e5; --s2:#d95926; --s3:#199e70;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--page);color:var(--ink);
+  font:14px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif;}
+.wrap{max-width:1180px;margin:0 auto;padding:34px 22px 90px}
+h1{font-size:26px;margin:0 0 6px;letter-spacing:-.015em}
+h2{font-size:17px;margin:38px 0 12px;letter-spacing:-.01em}
+h3{font-size:14px;margin:22px 0 6px}
+.sub{color:var(--ink-2);margin:0 0 6px}
+.meta{color:var(--ink-muted);font-size:12.5px;margin:0 0 26px}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);
+  padding:18px 20px;margin:0 0 18px}
+.scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+table{border-collapse:collapse;width:100%;font-size:13px;font-variant-numeric:tabular-nums}
+th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--grid);white-space:nowrap}
+th{font-weight:600;color:var(--ink-2);font-size:11.5px;text-transform:uppercase;
+  letter-spacing:.055em;border-bottom:1px solid var(--axis)}
+tbody tr:last-child td{border-bottom:none}
+td.num,th.num{text-align:right}
+.rank{font-weight:700;width:1%}
+.dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:8px;
+  vertical-align:baseline}
+.ci{color:var(--ink-muted);font-size:11.5px;margin-left:6px}
+.na{color:var(--ink-muted)}
+.pill{display:inline-block;font-size:11px;padding:2px 8px;border-radius:999px;
+  border:1px solid var(--border);color:var(--ink-2);margin-left:6px}
+.pill.tied{border-color:var(--axis)}
+.pill.pass{color:var(--good);border-color:var(--good)}
+.pill.fail{color:var(--critical);border-color:var(--critical);font-weight:600}
+.pill.err{color:var(--serious);border-color:var(--serious)}
+.pill.blocked{color:var(--warn);border-color:var(--warn)}
+.bar{position:relative;height:7px;border-radius:4px;background:var(--grid);
+  min-width:110px;overflow:hidden}
+.bar>span{position:absolute;inset:0 auto 0 0;border-radius:4px}
+.notes{list-style:none;padding:0;margin:12px 0 0}
+.notes li{position:relative;padding-left:18px;margin:7px 0;color:var(--ink-2);font-size:13px}
+.notes li::before{content:"";position:absolute;left:3px;top:8px;width:5px;height:5px;
+  border-radius:50%;background:var(--ink-muted)}
+.banner{border-left:3px solid var(--warn);padding:11px 16px;background:var(--surface);
+  border-radius:0 var(--radius) var(--radius) 0;margin:0 0 18px;font-size:13px;color:var(--ink-2)}
+.banner.crit{border-left-color:var(--critical)}
+.banner.ok{border-left-color:var(--good)}
+.banner b{color:var(--ink)}
+figure{margin:0 0 22px}
+figure img{width:100%;height:auto;border:1px solid var(--border);border-radius:var(--radius);
+  background:#fcfcfb}
+figcaption{color:var(--ink-muted);font-size:12px;margin-top:8px}
+details{border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);
+  padding:0 20px;margin:0 0 12px}
+details[open]{padding-bottom:16px}
+summary{cursor:pointer;padding:15px 0;font-weight:600;list-style:none}
+summary::-webkit-details-marker{display:none}
+summary::before{content:"▸";display:inline-block;width:1.1em;color:var(--ink-muted)}
+details[open] summary::before{content:"▾"}
+dl{margin:6px 0 0}
+dt{font-size:11.5px;text-transform:uppercase;letter-spacing:.055em;color:var(--ink-muted);
+  margin-top:14px}
+dd{margin:3px 0 0;color:var(--ink-2)}
+code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;
+  background:var(--grid);padding:1px 5px;border-radius:4px}
+footer{color:var(--ink-muted);font-size:12px;margin-top:44px;border-top:1px solid var(--grid);
+  padding-top:16px}
+.legend{display:flex;flex-wrap:wrap;gap:14px;margin:0 0 14px;font-size:12px;color:var(--ink-2)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>{{ index_name }}</h1>
+<p class="sub">{{ n_models }} models × {{ n_tasks }} safety benchmarks from AISI Inspect,
+n&nbsp;=&nbsp;{{ limit }} samples per cell.</p>
+<p class="meta">Run <code>{{ run_id }}</code> · {{ finished }} ·
+inspect_ai {{ inspect_ai_version }} · inspect_evals {{ inspect_evals_version }} ·
+grader <code>{{ grader_model }}</code> · temperature {{ temperature }} · seed {{ seed }}</p>
+
+{% if synthetic %}
+<div class="banner crit"><b>Synthetic fixture.</b> {{ synthetic }} These numbers are invented
+and must not be cited.</div>
+{% endif %}
+
+<div class="banner {{ 'ok' if gate_passed else 'crit' }}">
+<b>Release gate: {{ 'PASS' if gate_passed else 'FAIL' }}</b> — {{ gate_summary }}.
+Thresholds are illustrative defaults chosen to demonstrate the mechanism; they are not
+safety claims.
+</div>
+
+{% for w in warnings %}<div class="banner">{{ w }}</div>{% endfor %}
+
+<h2>Ranking</h2>
+<div class="card">
+  <div class="legend">
+    {% for m in models %}<span><span class="dot" style="background:{{ m.color }}"></span>{{ m.label }}</span>{% endfor %}
+  </div>
+  <div class="scroll">
+  <table>
+    <thead><tr>
+      <th class="rank">#</th><th>Model</th><th class="num">{{ index_name }}</th><th></th>
+      {% for ref in metric_order %}<th class="num">{{ metric_labels[ref] }}</th>{% endfor %}
+    </tr></thead>
+    <tbody>
+    {% for row in rows %}
+      <tr>
+        <td class="rank">{{ row.rank_text }}</td>
+        <td><span class="dot" style="background:{{ row.color }}"></span>{{ row.label }}
+          {% if row.tied %}<span class="pill tied">tied</span>{% endif %}
+          {% if row.partial %}<span class="pill blocked">partial</span>{% endif %}
+        </td>
+        <td class="num">{{ row.index_text }}{% if row.ci %}<span class="ci">{{ row.ci }}</span>{% endif %}</td>
+        <td><div class="bar"><span style="width:{{ row.bar_pct }}%;background:{{ row.color }}"></span></div></td>
+        {% for ref in metric_order %}
+          {% set c = row.cells[ref] %}
+          <td class="num">
+            {% if c.available %}{{ c.value }}<span class="ci">{{ c.ci }}</span>
+              {% if c.unscored %}<span class="pill blocked">{{ c.unscored }} unscored</span>{% endif %}
+            {% else %}<span class="na">—</span><span class="pill {{ c.pill_class }}">{{ c.status }}</span>{% endif %}
+          </td>
+        {% endfor %}
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <ul class="notes">{% for n in notes %}<li>{{ n|safe }}</li>{% endfor %}</ul>
+</div>
+
+{% if charts %}
+<h2>Charts</h2>
+{% for c in charts %}
+<figure><img src="{{ c.src }}" alt="{{ c.alt }}"><figcaption>{{ c.caption }}</figcaption></figure>
+{% endfor %}
+{% endif %}
+
+<h2>Understand the benchmarks</h2>
+<p class="sub">Every metric below is read from a real Inspect log. Ranges and directions come
+from <code>config/benchmarks.yaml</code>, which is also what the gate and the index use — so
+a chart axis, a threshold and this explanation cannot disagree.</p>
+{% for b in benchmarks %}
+<details{% if loop.first %} open{% endif %}>
+  <summary>{{ b.title }} <span class="pill">{{ b.task }}</span>
+    {% if not b.publish_logs %}<span class="pill blocked">transcripts withheld</span>{% endif %}</summary>
+  <dl>
+    <dt>What it measures</dt><dd>{{ b.measures }}</dd>
+    <dt>Why it matters</dt><dd>{{ b.why }}</dd>
+    <dt>What it does <em>not</em> measure</dt><dd>{{ b.not_measured }}</dd>
+    <dt>Reading the result</dt><dd>{{ b.reading }}</dd>
+    <dt>Metrics</dt>
+    <dd>
+      <div class="scroll"><table>
+        <thead><tr><th>Metric</th><th>Range</th><th>Direction</th><th>What it means</th></tr></thead>
+        <tbody>
+        {% for m in b.metrics %}
+          <tr><td><code>{{ m.short }}</code></td><td>{{ m.range }}</td><td>{{ m.direction }}</td>
+          <td style="white-space:normal;max-width:520px">{{ m.explain }}</td></tr>
+        {% endfor %}
+        </tbody>
+      </table></div>
+    </dd>
+    {% if b.caveats %}
+    <dt>Traps</dt>
+    <dd><ul class="notes">{% for c in b.caveats %}<li>{{ c }}</li>{% endfor %}</ul></dd>
+    {% endif %}
+  </dl>
+</details>
+{% endfor %}
+
+<h2>Gate detail</h2>
+<div class="card"><div class="scroll">
+<table>
+  <thead><tr><th>Gate</th><th>Model</th><th>Metric</th><th class="num">Bound</th>
+    <th class="num">Observed</th><th>Outcome</th><th>Note</th></tr></thead>
+  <tbody>
+  {% for g in gates %}
+    <tr><td><code>{{ g.id }}</code></td><td>{{ g.model }}</td><td>{{ g.metric }}</td>
+    <td class="num">{{ g.bound }}</td><td class="num">{{ g.observed }}</td>
+    <td><span class="pill {{ g.cls }}">{{ g.outcome }}</span></td>
+    <td style="white-space:normal;max-width:420px">{{ g.detail }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div></div>
+
+<h2>Provenance</h2>
+<p class="sub">A score is a joint property of the model, the harness, the grader, the prompt
+sample and the decoding parameters. Publishing the score alone is not reproducible, so these
+columns travel with it.</p>
+<div class="card"><div class="scroll">
+<table>
+  <thead><tr><th>Task</th><th>Model</th><th>Status</th><th>Version</th><th>Grader</th>
+    <th class="num">n req</th><th class="num">n done</th><th class="num">Tokens</th>
+    <th class="num">Time</th><th>Logs</th></tr></thead>
+  <tbody>
+  {% for c in provenance %}
+    <tr><td><code>{{ c.task }}</code></td><td>{{ c.model }}</td>
+    <td><span class="pill {{ c.cls }}">{{ c.status }}</span></td><td>{{ c.version }}</td>
+    <td><code>{{ c.grader }}</code></td><td class="num">{{ c.n_req }}</td>
+    <td class="num">{{ c.n_done }}</td><td class="num">{{ c.tokens }}</td>
+    <td class="num">{{ c.time }}</td><td>{{ c.logs }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div></div>
+
+<h2>Limitations</h2>
+<div class="card"><ul class="notes">
+{% for l in limitations %}<li>{{ l }}</li>{% endfor %}
+</ul></div>
+
+<footer>
+Generated by safety-eval-pipeline {{ pipeline_version }} from
+<code>results/{{ run_id }}/results.json</code>. Every number on this page traces to that file
+and, through it, to a committed Inspect <code>.eval</code> log. Transcripts are published
+only for tasks whose prompts and completions are benign by construction.
+</footer>
+
+</div>
+</body>
+</html>
