@@ -95,8 +95,8 @@ footer{color:var(--ink-muted);font-size:12px;margin-top:44px;border-top:1px soli
 <div class="wrap">
 
 <h1>{{ index_name }}</h1>
-<p class="sub">{{ n_models }} models × {{ n_tasks }} safety benchmarks from AISI Inspect,
-n&nbsp;=&nbsp;{{ limit }} samples per cell.</p>
+<p class="sub">{{ n_models }} models × {{ n_tasks }} safety benchmarks from AISI Inspect.<br>
+{{ limit }}</p>
 <p class="meta">Run <code>{{ run_id }}</code> · {{ finished }} ·
 inspect_ai {{ inspect_ai_version }} · inspect_evals {{ inspect_evals_version }} ·
 grader <code>{{ grader_model }}</code> · temperature {{ temperature }} · seed {{ seed }}</p>
@@ -206,6 +206,111 @@ a chart axis, a threshold and this explanation cannot disagree.</p>
   </tbody>
 </table>
 </div></div>
+
+{% if strata_tables %}
+<h2>Scores by stratum</h2>
+<p class="sub">Each benchmark broken down by its own categories. An aggregate refusal rate
+does not say whether refusals were spread evenly or concentrated in one prompt type — which,
+for a benchmark built to locate over-refusal, is the finding rather than a detail.</p>
+{% for st in strata_tables %}
+<div class="card">
+  <h3><code>{{ st.task }}</code> · {{ st.metric }}</h3>
+  <div class="scroll"><table>
+    <thead><tr><th>Model</th>{% for c in st.columns %}<th class="num">{{ c }}</th>{% endfor %}</tr></thead>
+    <tbody>
+    {% for r in st.rows %}
+      <tr><td>{{ r.label }}</td>
+      {% for v, n in r.cells %}<td class="num">{{ v }}<span class="ci">n={{ n }}</span></td>{% endfor %}
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+</div>
+{% endfor %}
+{% endif %}
+
+<h2>Contamination disclosure</h2>
+<p class="sub">Coded against the four-field disclosure schema, computed from what this run
+recorded rather than asserted. A control that was not applied is coded <code>0</code>; an
+honest <code>0</code> beside a named mechanism is worth more than an unearned <code>2</code>.</p>
+<div class="card">
+  <div class="scroll"><table>
+    <thead><tr><th>Field</th><th class="num">Code</th><th>Basis</th></tr></thead>
+    <tbody>
+    {% for r in disclosure.rows %}
+      <tr><td>{{ r.name }}</td>
+      <td class="num"><span class="pill {{ 'pass' if r.code == '2' else ('blocked' if r.code == '1' else 'fail') }}">{{ r.code }}</span></td>
+      <td style="white-space:normal">{{ r.why }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  <p class="se-note" style="margin-top:12px"><code>f2_notes</code>:
+    <b>{{ disclosure.f2_notes }}</b> — the five elicitation sub-elements in order: system
+    identity, version, token budget, attempts, attempt resolution.</p>
+</div>
+<div class="banner">{{ disclosure.headline }}</div>
+
+<h2>Parameter register</h2>
+<p class="sub">The register from this repository's pre-Inspect pipeline, filled from this run.
+It assumes a locally-served quantized model, so a row's applicability depends on the serving
+arrangement — a blank row and a not-applicable row are different claims, so every row that
+cannot be filled carries its reason.</p>
+{% for sec in register %}
+<details>
+  <summary>{{ sec.section }}</summary>
+  <div class="scroll"><table>
+    <thead><tr><th>Parameter</th><th>Value</th><th>Status</th></tr></thead>
+    <tbody>
+    {% for r in sec.rows %}
+      <tr><td><code>{{ r.parameter }}</code></td><td style="white-space:normal">{{ r.value }}</td>
+      <td>{% if r.cls %}<span class="pill {{ r.cls }}">{{ r.status }}</span>{% else %}<span class="na">{{ r.status }}</span>{% endif %}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+</details>
+{% endfor %}
+
+<h2>Run conditions</h2>
+<p class="sub">{{ conditions.preamble }}</p>
+<div class="card">
+  <div class="scroll"><table>
+    <thead><tr><th>Parameter</th><th>Value</th></tr></thead>
+    <tbody>
+    {% for k, v in conditions.shared %}<tr><td>{{ k }}</td><td>{{ v }}</td></tr>{% endfor %}
+    </tbody>
+  </table></div>
+  {% if conditions.all_identical %}
+  <p class="notes" style="margin-top:14px"><span class="pill pass">identical</span>
+    Every model was run under the same conditions for every benchmark.</p>
+  {% else %}
+  <p class="notes" style="margin-top:14px"><span class="pill fail">not identical</span>
+    The comparison is not like-for-like:</p>
+  <ul class="notes">{% for d in conditions.divergence %}<li>{{ d }}</li>{% endfor %}</ul>
+  {% endif %}
+</div>
+
+{% for t in conditions.tasks %}
+<details>
+  <summary><code>{{ t.key }}</code>
+    <span class="pill {{ 'pass' if t.fully_covered else 'blocked' }}">{{ t.coverage }}</span>
+  </summary>
+  <div class="scroll"><table>
+    <thead><tr><th>Parameter</th><th>Value</th></tr></thead>
+    <tbody>
+    {% for k, v in t.rows %}<tr><td>{{ k }}</td><td>{{ v }}</td></tr>{% endfor %}
+    <tr><td>Stratum coverage</td><td>{{ t.coverage }}</td></tr>
+    {% if t.strata %}<tr><td>Samples per stratum</td><td>{{ t.strata }}</td></tr>{% endif %}
+    </tbody>
+  </table></div>
+</details>
+{% endfor %}
+
+<div class="banner">{{ conditions.coverage_note }}</div>
+{% if conditions.under_covered %}
+<div class="banner crit"><b>Incomplete stratum coverage.</b>
+{% for u in conditions.under_covered %}{{ u }}{% if not loop.last %}; {% endif %}{% endfor %}.
+Those cells scored the categories they reached, not the whole benchmark.</div>
+{% endif %}
 
 <h2>Provenance</h2>
 <p class="sub">A score is a joint property of the model, the harness, the grader, the prompt

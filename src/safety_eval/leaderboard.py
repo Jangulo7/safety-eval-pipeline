@@ -263,8 +263,7 @@ def _notes(results: ResultSet, config: RunConfig, rows: list[LeaderboardRow]) ->
         f"The {config.leaderboard.index_name} is a weighted mean of metrics normalised to "
         "0-1 (1 = better) using the range and direction recorded in "
         "`config/benchmarks.yaml`. The weighting is a choice, not a measurement.",
-        f"n = {results.metadata.limit} samples per task per model, capped for cost. "
-        "This is not a full-benchmark result.",
+        results.sample_size_note(),
     ]
     if any(r.tied_with for r in rows):
         notes.append(

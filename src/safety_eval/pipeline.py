@@ -56,6 +56,30 @@ def run_matrix(
     return results, run_dir
 
 
+class PublicationError(RuntimeError):
+    """An artefact would have carried something that must not be published."""
+
+
+def assert_publishable(results: ResultSet) -> None:
+    """Refuse to render artefacts that reference a withheld transcript.
+
+    The transcript itself was never in the record set; the *path to it* was, which is a
+    pointer to withheld content and carries the host's filesystem layout. Checked here as
+    well as at the point of recording, because this is the last gate before anything is
+    written to a file someone might commit.
+    """
+    offenders = [
+        f"{c.task_key}/{c.label}: {c.log_path}"
+        for c in results
+        if not c.log_published and c.log_path
+    ]
+    if offenders:
+        raise PublicationError(
+            "records for tasks whose transcripts are withheld must not carry a log path: "
+            + "; ".join(offenders)
+        )
+
+
 def report(
     config: RunConfig,
     *,
@@ -76,6 +100,7 @@ def report(
     run_dir = Path(run_dir)
     if results is None:
         results = ResultSet.load(run_dir / "results.json")
+    assert_publishable(results)
 
     board = build_leaderboard(results, config)
     gate_report = evaluate(results, config)

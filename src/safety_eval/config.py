@@ -61,6 +61,13 @@ class TaskSpec:
     benchmark: str
     args: dict[str, Any] = field(default_factory=dict)
     subset: str | None = None
+    limit: int | None = None
+    """Overrides ``defaults.limit`` for this task. The datasets differ by an order of
+    magnitude — XSTest-safe is 250 samples and sycophancy 4,882 — so one cap either
+    truncates the small ones needlessly or makes the large one unaffordable. Recorded per
+    cell either way, and identical across models within a task."""
+
+    limit_is_set: bool = False
 
     @property
     def slug(self) -> str:
@@ -95,10 +102,25 @@ class GateSpec:
 class Defaults:
     """Decoding and concurrency parameters applied to every cell."""
 
-    limit: int = 50
+    limit: int | None = 50
+    """Samples per cell, or None to run the full dataset."""
+
     max_connections: int = 8
     temperature: float = 0.0
     seed: int = 42
+    """Seeds *generation*. It does not affect which samples are drawn."""
+
+    sample_shuffle: int | None = 42
+    """Seeds the *dataset ordering*, applied before ``limit``.
+
+    Without it a capped run takes the first N samples of a dataset that is grouped by
+    stratum, so it evaluates one or two categories and nothing else. With it, the subset is
+    both representative and reproducible. These are different knobs from ``seed`` and both
+    are recorded with every score."""
+
+    epochs: int = 1
+    """Samples per prompt. 1 at temperature 0 means no generation variance is captured."""
+
     max_retries: int = 1
     timeout_s: int = 1800
 
@@ -156,7 +178,8 @@ class RunConfig:
 
         self.tasks = [
             TaskSpec(key=t["key"], benchmark=t["benchmark"], args=dict(t.get("args") or {}),
-                     subset=t.get("subset"))
+                     subset=t.get("subset"), limit=t.get("limit"),
+                     limit_is_set="limit" in t)
             for t in data["tasks"]
         ]
         if not self.tasks:
@@ -325,9 +348,41 @@ class RunConfig:
         """Every (model, task) pair the run will attempt, in execution order."""
         return [(m, t) for t in self.tasks for m in self.models]
 
+    def limit_for(self, task: TaskSpec) -> int | None:
+        """The sample cap that applies to a task: its own if set, else the run default."""
+        return task.limit if task.limit_is_set else self.defaults.limit
+
     def estimated_samples(self) -> int:
         """Total graded samples the run will request. Shown before spending anything."""
-        return len(self.cells) * self.defaults.limit
+        total = 0
+        for task in self.tasks:
+            limit = self.limit_for(task)
+            if limit is None:
+                bench = self.catalog[task.benchmark]
+                subset = (bench.subsets.get(task.subset or "", {}) or {})
+                limit = int(subset.get("dataset_samples")
+                            or bench.dataset.get("total_samples") or 0)
+            total += limit * len(self.models)
+        return total
+
+    def run_conditions(self) -> dict[str, Any]:
+        """Every parameter applied identically to every cell.
+
+        Rendered verbatim into the results table, the HTML and the PDF. A score is only
+        comparable across models if these were the same for all of them, so they are
+        recorded once at run level and again per cell, and the reporter cross-checks the two.
+        """
+        d = self.defaults
+        return {
+            "limit": d.limit if d.limit is not None else "full dataset",
+            "epochs": d.epochs,
+            "temperature": d.temperature,
+            "seed": d.seed,
+            "sample_shuffle": d.sample_shuffle,
+            "max_connections": d.max_connections,
+            "grader_model": self.grader_model,
+            "provider": self.provider,
+        }
 
 
 def interpolate(data: Any, root: dict[str, Any] | None = None) -> Any:
@@ -410,8 +465,15 @@ def _apply_overrides(data: dict[str, Any], overrides: dict[str, Any]) -> dict[st
         data["_scoped"] = {"dropped_gates": dropped_gates,
                            "dropped_weights": dropped_weights}
     for key, value in (overrides.get("defaults") or {}).items():
-        if value is not None:
-            data.setdefault("defaults", {})[key] = value
+        if value is None:
+            continue
+        data.setdefault("defaults", {})[key] = value
+        if key == "limit":
+            # An explicit --limit must beat a per-task limit, or the flag is silently
+            # ignored for exactly the tasks that set one -- the failure mode where a run
+            # reports a cap it never applied.
+            for task in data["tasks"]:
+                task.pop("limit", None)
     for key in ("charts", "html", "pdf"):
         if (value := overrides.get(key)) is not None:
             data.setdefault("output", {})[key] = value

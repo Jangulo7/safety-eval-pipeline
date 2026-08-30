@@ -175,7 +175,34 @@ def test_override_naming_something_unknown_is_an_error(catalog: Catalog) -> None
 
 def test_cells_and_sample_estimate(config: RunConfig) -> None:
     assert len(config.cells) == len(config.models) * len(config.tasks)
-    assert config.estimated_samples() == len(config.cells) * config.defaults.limit
+    expected = sum(
+        (config.limit_for(t) if config.limit_for(t) is not None
+         else config.catalog[t.benchmark].subsets.get(t.subset or "", {}).get(
+             "dataset_samples") or config.catalog[t.benchmark].dataset["total_samples"])
+        * len(config.models)
+        for t in config.tasks
+    )
+    assert config.estimated_samples() == expected
+
+
+def test_an_explicit_limit_override_beats_a_task_limit(catalog: Catalog) -> None:
+    """Otherwise --limit is silently ignored for exactly the tasks that set their own.
+
+    That is the failure mode this pipeline audits for elsewhere: a run reporting a
+    parameter it never applied.
+    """
+    cfg = RunConfig.load(None, catalog, overrides={"defaults": {"limit": 5}})
+    for task in cfg.tasks:
+        assert cfg.limit_for(task) == 5, f"{task.key} kept its own limit"
+
+
+def test_a_task_may_cap_itself_independently(config: RunConfig) -> None:
+    """The datasets differ by an order of magnitude; one cap cannot serve all of them.
+
+    XSTest-safe is 250 samples and runs in full; sycophancy is 4,882 and must be capped.
+    """
+    assert config.limit_for(config.task("xstest_safe")) is None, "runs the full dataset"
+    assert config.limit_for(config.task("sycophancy")) == 250
 
 
 def test_model_slug_is_filesystem_safe(config: RunConfig) -> None:

@@ -32,10 +32,15 @@ Thumbs.db
 # Private working notes
 .private/
 
-# Inspect logs. StrongREJECT transcripts contain harmful completions and are NEVER
-# committed — see docs/SPEC.md §9.
-logs/strong_reject/
-logs/**/*.eval
+# Inspect logs are not committed at all.
+#
+# StrongREJECT transcripts contain model responses to forbidden prompts and are NEVER
+# publishable (docs/SPEC.md §9). The benign tasks' transcripts would be publishable, but
+# they are large binary .eval files and everything a reader needs — aggregate scores, per
+# stratum scores, sample counts, dataset fingerprints, the full provenance record — is in
+# results/published/. Excluding the whole tree removes the chance of a withheld transcript
+# reaching a commit through a path nobody thought about.
+logs/
 
 # Run outputs (regenerable from results.json); committed results live in results/published/
 results/*/

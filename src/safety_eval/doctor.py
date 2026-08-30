@@ -127,10 +127,13 @@ def diagnose(
               f"{len(config.cells)} cells, {config.estimated_samples()} samples requested")
 
     _check_credentials(d, config)
+    _check_provider_extras(d, config)
     _check_datasets(d, config, catalog, check_network=check_network)
     if check_network:
         _check_openrouter(d, config)
     _check_aws(d)
+    _check_sample_ordering(d, config, catalog)
+    _check_stratum_coverage(d, config, catalog)
     _check_log_safety(d, config, catalog)
     if check_metrics:
         _check_metric_drift(d, config, catalog)
@@ -164,6 +167,39 @@ def _check_versions(d: Diagnosis, catalog: Catalog) -> None:
         d.add("harness", Level.OK, detail + " (matches the catalog)")
 
 
+def _check_provider_extras(d: Diagnosis, config: RunConfig) -> None:
+    """Confirm each provider's optional Python dependencies are actually importable.
+
+    A valid API key is not the same as a usable provider. ``inspect_ai`` ships its provider
+    integrations as optional extras, so a missing package surfaces as a ``PrerequisiteError``
+    at *generation* time — after the credential check has passed, after the dataset has
+    downloaded, and once per cell. This check moves that failure to the front.
+    """
+    providers = sorted({m.provider for m in config.models}
+                       | {config.grader_model.split("/", 1)[0]})
+    for provider in providers:
+        if provider == "mockllm":
+            continue
+        name = f"provider:{provider}"
+        try:
+            from inspect_ai.model import get_model
+
+            model = next((m.id for m in config.models if m.provider == provider),
+                         config.grader_model)
+            api = get_model(model).api
+            d.add(name, Level.OK, f"{type(api).__name__} constructs")
+        except Exception as exc:
+            message = " ".join(str(exc).split())
+            hint = ""
+            if "pip install" in message:
+                hint = message[message.index("pip install"):].strip("[] ")
+            d.add(name, Level.FAIL,
+                  f"the {provider} provider cannot be constructed: {message[:160]}",
+                  (f"{hint}\n" if hint else "")
+                  + "inspect_ai ships provider integrations as optional extras; without "
+                    "them every cell fails at generation time, not at start-up")
+
+
 def _check_credentials(d: Diagnosis, config: RunConfig) -> None:
     providers = {m.provider for m in config.models}
     env_for = {
@@ -174,8 +210,12 @@ def _check_credentials(d: Diagnosis, config: RunConfig) -> None:
         "together": "TOGETHER_API_KEY",
         "bedrock": None,  # boto3 credential chain
         "mockllm": None,
+        "vllm": None,     # handled below: a local server needs a base URL, not a secret
     }
     for provider in sorted(providers):
+        if provider == "vllm":
+            _check_vllm_server(d)
+            continue
         var = env_for.get(provider, f"{provider.upper()}_API_KEY")
         if var is None:
             d.add(f"creds:{provider}", Level.OK, "uses the ambient credential chain")
@@ -200,6 +240,44 @@ def _check_credentials(d: Diagnosis, config: RunConfig) -> None:
         d.add("creds:grader", level,
               f"grader {config.grader_model} needs {var or 'ambient credentials'}",
               "without it every judge-graded metric comes back nan")
+
+
+def _check_vllm_server(d: Diagnosis) -> None:
+    """A locally served model needs a reachable server, not an API key.
+
+    Inspect's vLLM provider will otherwise try to *start* one, which requires `vllm`
+    installed in this environment -- and vLLM pins its own torch build, so installing it
+    here would replace the torch the rest of the pipeline sits on. Connecting to a server
+    run from a separate virtualenv is the supported arrangement.
+    """
+    base_url = os.environ.get("VLLM_BASE_URL", "")
+    if not base_url:
+        d.add("vllm server", Level.FAIL, "VLLM_BASE_URL is not set",
+              "start the server from its own virtualenv and export the URL:\n"
+              "  ~/venvs/vllm/bin/vllm serve <model> --port 8000 --api-key inspectai\n"
+              "  export VLLM_BASE_URL=http://127.0.0.1:8000/v1\n"
+              "Without it Inspect tries to start its own server, which needs vllm installed "
+              "here -- and vLLM pins a torch build that would replace this one.")
+        return
+    try:
+        import requests
+
+        key = os.environ.get("VLLM_API_KEY", "inspectai")
+        resp = requests.get(f"{base_url.rstrip('/')}/models",
+                            headers={"Authorization": f"Bearer {key}"}, timeout=10)
+        if resp.status_code == 200:
+            served = [m.get("id") for m in resp.json().get("data", [])]
+            d.add("vllm server", Level.OK,
+                  f"{base_url} reachable, serving: {', '.join(served) or '(none)'}")
+        elif resp.status_code == 401:
+            d.add("vllm server", Level.FAIL, f"{base_url} returned 401",
+                  "VLLM_API_KEY must match the server's --api-key (Inspect defaults to "
+                  "'inspectai')")
+        else:
+            d.add("vllm server", Level.FAIL, f"{base_url} returned HTTP {resp.status_code}")
+    except Exception as exc:
+        d.add("vllm server", Level.FAIL, f"{base_url} unreachable ({type(exc).__name__})",
+              "start it with `~/venvs/vllm/bin/vllm serve <model> --port 8000`")
 
 
 def _check_datasets(
@@ -314,6 +392,93 @@ def _check_aws(d: Diagnosis) -> None:
               "check AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_DEFAULT_REGION")
     except Exception as exc:
         d.add("aws:s3", Level.WARN, f"bucket {bucket}: {exc}")
+
+
+def _check_sample_ordering(d: Diagnosis, config: RunConfig, catalog: Catalog) -> None:
+    """Catch a task whose sample ordering is nondeterministic and has not been pinned.
+
+    `inspect_evals/sycophancy` shuffles its dataset by default with no seed. Under a sample
+    cap that means every cell draws a different subset — two loads of 50 were measured to
+    share none — so a matrix would score each model on different prompts and the leaderboard
+    would be ranking sampling noise. `--seed` does not cover it: that seeds generation, not
+    dataset ordering. Cheap to check, expensive to discover afterwards.
+    """
+    for task in config.tasks:
+        bench = catalog[task.benchmark]
+        if not bench.order_is_nondeterministic:
+            continue
+        name = f"sample order:{task.key}"
+        pinned = bench.order_pinned_by(task.args)
+        required = bench.sample_order.get("deterministic_when") or {}
+        as_yaml = ", ".join(f"{k}: {v}" for k, v in required.items())
+
+        if pinned:
+            d.add(name, Level.OK, f"pinned ({as_yaml}) — every cell scores the same samples")
+        elif len(config.models) > 1:
+            d.add(name, Level.FAIL,
+                  f"{task.key} draws a different sample set per cell, so the "
+                  f"{len(config.models)} models would not be compared on the same prompts",
+                  f"set `args: {{{as_yaml}, ...}}` for task {task.key!r} in "
+                  "config/eval_config.yaml\n"
+                  + " ".join((bench.sample_order.get("hazard") or "").split()))
+        else:
+            d.add(name, Level.WARN,
+                  f"{task.key} draws a different sample set each run, so this run is not "
+                  "comparable with any other",
+                  f"set `args: {{{as_yaml}, ...}}` to make it reproducible")
+
+
+def _check_stratum_coverage(d: Diagnosis, config: RunConfig, catalog: Catalog) -> None:
+    """Refuse a sample cap that would evaluate one corner of a grouped dataset.
+
+    All three of these datasets are grouped by category, so a cap applied to the unshuffled
+    head is not a subsample of the benchmark -- it is a run of one or two categories.
+    Measured on inspect_evals 0.18.0 at limit=50: xstest-safe covers 2 of 10 prompt types,
+    xstest-unsafe 2 of 8, strong_reject 1 of 6, sycophancy 1 of 6. A seeded eval-level
+    `sample_shuffle` restores full coverage while staying reproducible, so its absence under
+    a cap is a hard failure rather than a warning.
+    """
+    shuffle = config.defaults.sample_shuffle
+
+    for task in config.tasks:
+        limit = config.limit_for(task)
+        bench = catalog[task.benchmark]
+        strata = int((bench.subsets.get(task.subset or "", {}) or {}).get("strata")
+                     or bench.dataset.get("strata") or 0)
+        if not strata:
+            continue
+        name = f"coverage:{task.key}"
+        total = bench.dataset.get("total_samples")
+
+        if limit is None:
+            d.add(name, Level.OK, f"full dataset — all {strata} strata evaluated")
+            continue
+        if shuffle is None:
+            d.add(name, Level.FAIL,
+                  f"limit={limit} with no sample_shuffle takes the head of a dataset "
+                  f"grouped into {strata} strata, so most categories are never evaluated",
+                  "set `defaults.sample_shuffle: 42` in config/eval_config.yaml — it seeds "
+                  "the dataset order before the limit, giving a representative and "
+                  "reproducible subset. `seed` does not do this; it seeds generation.")
+            continue
+        if limit < strata:
+            d.add(name, Level.FAIL,
+                  f"limit={limit} cannot cover {strata} strata even when shuffled",
+                  f"raise defaults.limit to at least {strata * 5} (~5 per stratum) or set "
+                  "it to null to run the full dataset")
+            continue
+
+        per = limit / strata
+        detail = (f"limit={limit} shuffled with seed {shuffle} over {strata} strata "
+                  f"(~{per:.0f} per stratum"
+                  + (f", {limit / total:.0%} of {total}" if total else "") + ")")
+        if per < 5:
+            d.add(name, Level.WARN, detail,
+                  "fewer than ~5 samples per stratum: the subset covers every category but "
+                  "thinly, so per-stratum behaviour is not resolvable and the intervals "
+                  "will be wide. Raise the limit if a category-level claim is wanted.")
+        else:
+            d.add(name, Level.OK, detail)
 
 
 def _check_log_safety(d: Diagnosis, config: RunConfig, catalog: Catalog) -> None:

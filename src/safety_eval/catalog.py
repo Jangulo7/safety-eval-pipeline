@@ -144,6 +144,58 @@ class BenchmarkSpec:
     caveats: tuple[Caveat, ...] = ()
     task_version_expected: str | None = None
     dataset_samples: int | None = None
+    protocol: dict[str, dict[str, Any]] = field(default_factory=dict)
+    """Generation parameters this benchmark is run under.
+
+    ``source: task`` means the value comes from ``inspect_evals``' own task definition --
+    the benchmark's published protocol. ``source: pipeline`` means the task specifies
+    nothing and this pipeline chose, which is a decision that must appear in the report
+    rather than being inherited silently from a serving provider's default.
+
+    The parameters are per *benchmark*, not per run: StrongREJECT is published at
+    temperature 0.75 and XSTest at 0.0, and flattening both to one number would either
+    break StrongREJECT's protocol or make XSTest nondeterministic. Comparisons are made
+    within a benchmark, where every model sees identical parameters.
+    """
+
+    sample_order: dict[str, Any] = field(default_factory=dict)
+    """Set when the task's sample ordering is nondeterministic unless specific args are
+    pinned. ``deterministic_when`` maps arg name to the value that pins it."""
+
+    def generate_params(self) -> dict[str, Any]:
+        """The generation kwargs to pass to ``inspect_ai.eval`` for this benchmark."""
+        return {k: v["value"] for k, v in self.protocol.items() if k != "epochs"}
+
+    def protocol_rows(self) -> list[tuple[str, str, str, str]]:
+        """``(parameter, value, source, note)`` for the report's conditions table."""
+        rows = []
+        for key, spec in self.protocol.items():
+            source = spec.get("source", "pipeline")
+            label = ("benchmark protocol (inspect_evals task definition)"
+                     if source == "task" else "pipeline choice — task specifies none")
+            rows.append((key, str(spec["value"]), label,
+                         " ".join((spec.get("note") or "").split())))
+        return rows
+
+    @property
+    def deviates_from_protocol(self) -> bool:
+        """True when any applied parameter was chosen here rather than by the benchmark."""
+        return any(s.get("source") != "task" for s in self.protocol.values())
+
+    @property
+    def order_is_nondeterministic(self) -> bool:
+        """Whether a capped run of this task draws a different subset each time.
+
+        A benchmark with an unseeded shuffle cannot be used to compare two models under a
+        sample cap without pinning the ordering: each model is scored on different prompts,
+        and the difference between them is sampling noise dressed up as a finding.
+        """
+        return bool(self.sample_order.get("deterministic_when"))
+
+    def order_pinned_by(self, args: dict[str, Any]) -> bool:
+        """Whether ``args`` pin the sample ordering to something reproducible."""
+        required = self.sample_order.get("deterministic_when") or {}
+        return all(args.get(k) == v for k, v in required.items())
 
     @property
     def gated(self) -> bool:
@@ -322,4 +374,6 @@ def _parse_benchmark(key: str, spec: dict[str, Any]) -> BenchmarkSpec:
         ),
         task_version_expected=spec.get("task_version_expected"),
         dataset_samples=spec.get("dataset_samples"),
+        sample_order=spec.get("sample_order", {}),
+        protocol=spec.get("protocol", {}),
     )

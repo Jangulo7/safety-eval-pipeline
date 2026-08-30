@@ -4,35 +4,72 @@
 # Metric references are "<task_key>:<score_name>/<metric_key>" and are validated against
 # config/benchmarks.yaml at load time — a typo is a startup error, not a silent skip.
 
-provider: openrouter
+# Models are served locally through one vLLM process. This is the only configuration in
+# which "identical conditions" is literally true: one engine, one precision, one host, one
+# set of sampling parameters that every model honours -- including `seed`, which Anthropic's
+# API does not accept, and which a temperature above 0 makes load-bearing.
+#
+# Proprietary models were removed for exactly that reason. See .private/PRE-RUN-AUDIT.md A4.
+provider: vllm
+
+# Applied identically to every model. bf16 is each model's native release precision, so no
+# quantization error is introduced and the format is available for all three.
+serving:
+  backend: vllm
+  dtype: bfloat16
+  quantization: none          # native weights; set e.g. fp8 to compare a quantized serving
+  base_url_env: VLLM_BASE_URL
+  max_model_len: 8192
+  gpu_memory_utilization: 0.85
+  served_one_at_a_time: true  # 3 x ~16GB bf16 does not co-reside in 32GB VRAM
 
 models:
-  - id: openrouter/anthropic/claude-sonnet-4.5
-    family: anthropic
-    label: "Claude Sonnet 4.5"
-  - id: openrouter/openai/gpt-4.1
-    family: openai
-    label: "GPT-4.1"
-  - id: openrouter/meta-llama/llama-3.3-70b-instruct
-    family: meta
-    label: "Llama 3.3 70B"
+  - id: vllm/Qwen/Qwen2.5-7B-Instruct
+    family: qwen
+    label: "Qwen2.5 7B Instruct"
+    params_b: 7.6
+  - id: vllm/meta-llama/Llama-3.1-8B-Instruct
+    family: llama
+    label: "Llama 3.1 8B Instruct"
+    params_b: 8.0
+  - id: vllm/mistralai/Ministral-8B-Instruct-2410
+    family: mistral
+    label: "Ministral 8B Instruct"
+    params_b: 8.0
 
 # One grader for every judge-graded task, so grader-dependence is at least held constant
 # across models. It is NOT quantified — see docs/SPEC.md §11.3.
 grader_model: openrouter/openai/gpt-4.1-mini
 
 defaults:
-  limit: 50                 # samples per task per model, capped for cost. Stated everywhere.
+  # Samples per task per model. `null` runs the FULL dataset, which removes the subsampling
+  # caveat entirely: the number becomes the benchmark's score rather than a sample of it.
+  # Affordable here because generation is local; only the grader costs money. Tasks may
+  # override this — sycophancy does, because its dataset is 4,882 samples.
+  limit: null
+
+  # Seeds the DATASET ORDER, applied before `limit`. This is not optional: every one of
+  # these datasets is grouped by stratum, so an unshuffled limit=50 evaluates one or two
+  # categories and nothing else. Measured: xstest-safe covers 2/10 prompt types unshuffled
+  # and 10/10 with this set; strong_reject 1/6 and 6/6; sycophancy 1/6 and 6/6.
+  # Distinct from `seed`, which seeds generation and has no effect on sample selection.
+  sample_shuffle: 42
+
   max_connections: 8
-  temperature: 0.0
-  seed: 42
+  seed: 42                  # seeds generation only; load-bearing where temperature > 0
   max_retries: 1            # one retry on a transient error, then record and continue
   timeout_s: 1800
 
 tasks:
   - key: sycophancy
     benchmark: sycophancy
-    args: {scorer_model: "${grader_model}"}
+    # 4,882 samples would dominate the run and the grader bill. 250 with the seeded
+    # dataset-order shuffle covers all six source datasets and is stated everywhere the
+    # number appears.
+    limit: 250
+    # shuffle must be pinned: the task's default shuffle is unseeded, so without this each
+    # model would be scored on a different random 50 samples. See benchmarks.yaml.
+    args: {shuffle: false, scorer_model: "${grader_model}"}
 
   - key: xstest_safe
     benchmark: xstest

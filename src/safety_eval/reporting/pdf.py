@@ -28,6 +28,7 @@ from reportlab.platypus import (
     BaseDocTemplate,
     Frame,
     Image,
+    KeepTogether,
     PageBreak,
     PageTemplate,
     Paragraph,
@@ -38,10 +39,13 @@ from reportlab.platypus import (
 
 from ..catalog import Direction
 from ..config import RunConfig
+from ..disclosure import contamination_disclosure, parameter_register
 from ..gates import GateOutcome, GateReport
 from ..leaderboard import Leaderboard
 from ..results import CellStatus, ResultSet
 from . import theme
+from .conditions import COVERAGE_NOTE, PREAMBLE
+from .conditions import build as build_conditions
 from .html import LIMITATIONS
 
 INK = colors.HexColor(theme.INK)
@@ -145,7 +149,7 @@ def build_pdf(
     story.append(Paragraph("Safety benchmark report", styles["title"]))
     story.append(Paragraph(
         f"{len(results.models)} models &times; {len(results.task_keys)} safety benchmarks "
-        f"from AISI Inspect · n = {meta.limit} samples per cell",
+        f"from AISI Inspect<br/>{_strip_md(results.sample_size_note())}",
         styles["subtitle"]))
 
     if meta.notes:
@@ -259,6 +263,134 @@ def build_pdf(
         seen.add(bench.key)
         story.append(PageBreak())
         story += _benchmark_page(bench, results, config, styles)
+
+    # ------------------------------------------------------ 4b. run conditions
+    cond = build_conditions(results, config)
+    story.append(PageBreak())
+    story.append(Paragraph("Run conditions", styles["h1"]))
+    story.append(Paragraph(PREAMBLE, styles["body"]))
+    story.append(_table(
+        [[Paragraph(h, styles["cellhead"]) for h in ["Parameter", "Value"]]]
+        + [[Paragraph(str(k), styles["cell"]), Paragraph(str(v), styles["cell"])]
+           for k, v in cond.shared],
+        [70 * mm, CONTENT_W - 70 * mm]))
+    story.append(Spacer(1, 8))
+    if cond.all_identical:
+        story.append(_banner("<b>Conditions were identical across every model.</b> The "
+                             "comparison is like-for-like.", GOOD, styles))
+    else:
+        detail = "; ".join(
+            f"{task_key} · {field_name}: {', '.join(values)}"
+            for task_key, diverged in cond.divergence.items()
+            for field_name, values in diverged.items())
+        story.append(_banner(f"<b>Conditions were NOT identical across models.</b> The "
+                             f"ranking in this report is not like-for-like: {detail}",
+                             CRIT, styles))
+
+    for tc in cond.tasks:
+        rows = list(tc.rows) + [("Stratum coverage", tc.coverage_text)]
+        if tc.stratum_counts:
+            rows.append(("Samples per stratum",
+                         ", ".join(f"{k} {v}" for k, v in tc.stratum_counts.items())))
+        block = [Paragraph(tc.task_key, styles["h2"]),
+                 _table([[Paragraph(h, styles["cellhead"]) for h in ["Parameter", "Value"]]]
+                        + [[Paragraph(str(k).replace("`", ""), styles["cell"]),
+                            Paragraph(str(v).replace("`", ""), styles["cell"])]
+                           for k, v in rows],
+                        [55 * mm, CONTENT_W - 55 * mm])]
+        story.append(KeepTogether(block))
+        story.append(Spacer(1, 6))
+
+    story.append(Spacer(1, 4))
+    story.append(Paragraph(_strip_md(COVERAGE_NOTE), styles["body"]))
+    if cond.under_covered:
+        story.append(_banner(
+            "<b>Incomplete stratum coverage.</b> " + "; ".join(cond.under_covered)
+            + ". Those cells scored the categories they reached, not the whole benchmark.",
+            CRIT, styles))
+
+    # ------------------------------------------------- 4c. disclosure and the register
+    story.append(PageBreak())
+    story.append(Paragraph("Contamination disclosure", styles["h1"]))
+    story.append(Paragraph(
+        "Coded against the four-field disclosure schema, computed from what this run "
+        "recorded rather than asserted. A control that was not applied is coded 0; an "
+        "honest 0 beside a named mechanism is worth more than an unearned 2.",
+        styles["body"]))
+    has_strata = any(m.per_stratum for c in results for m in c.metrics)
+    disc = contamination_disclosure(results, config, per_stratum=has_strata)
+    story.append(_table(
+        [[Paragraph(h, styles["cellhead"]) for h in ["Field", "Code", "Basis"]]]
+        + [[Paragraph(n, styles["cell"]), Paragraph(f"<b>{c}</b>", styles["cell"]),
+            Paragraph(w, styles["cell"])] for n, c, w in disc.rows()],
+        [46 * mm, 12 * mm, CONTENT_W - 58 * mm]))
+    story.append(Spacer(1, 6))
+    story.append(Paragraph(
+        f"<font face='Courier'>f2_notes</font>: <b>{disc.f2_notes}</b> — the five "
+        "elicitation sub-elements in order: system identity, version, token budget, "
+        "attempts, attempt resolution.", styles["small"]))
+    story.append(Spacer(1, 8))
+    story.append(_banner(disc.headline, WARN, styles))
+
+    story.append(PageBreak())
+    story.append(Paragraph("Parameter register", styles["h1"]))
+    story.append(Paragraph(
+        "The register from this repository's pre-Inspect pipeline, filled from this run. It "
+        "assumes a locally-served quantized model, so a row's applicability depends on the "
+        "serving arrangement — a blank row and a not-applicable row are different claims, "
+        "so every row that cannot be filled carries its reason.", styles["body"]))
+    # Group the register's rows by section, then emit one table per section. Each section
+    # is kept together so a parameter never lands on a different page from its heading.
+    sections: list[tuple[str, list[list[Any]]]] = []
+    for row in parameter_register(results, config):
+        if not sections or sections[-1][0] != row.section:
+            sections.append((row.section, []))
+        sections[-1][1].append([
+            Paragraph(str(row.parameter), styles["cell"]),
+            Paragraph(str(row.value), styles["cell"]),
+            Paragraph(row.status, styles["cell"]),
+        ])
+    for section, body_rows in sections:
+        head = [Paragraph(h, styles["cellhead"])
+                for h in ["Parameter", "Value", "Status"]]
+        story.append(KeepTogether([
+            Paragraph(section, styles["h2"]),
+            _table([head] + body_rows, [44 * mm, CONTENT_W - 74 * mm, 26 * mm]),
+        ]))
+        story.append(Spacer(1, 5))
+
+    if has_strata:
+        story.append(PageBreak())
+        story.append(Paragraph("Scores by stratum", styles["h1"]))
+        story.append(Paragraph(
+            "Each benchmark broken down by its own categories. An aggregate refusal rate "
+            "does not say whether refusals were spread evenly or concentrated in one prompt "
+            "type — which, for a benchmark built to locate over-refusal, is the finding "
+            "rather than a detail.", styles["body"]))
+        for task in config.tasks:
+            rows_, columns = [], []
+            for model_id in results.models:
+                cell = results.get(task.key, model_id)
+                if cell is None or not cell.ok:
+                    continue
+                for m in cell.metrics:
+                    if not m.per_stratum:
+                        continue
+                    columns = columns or sorted(m.per_stratum)
+                    suffix = "%" if m.unit == "percent" else ""
+                    rows_.append([cell.label] + [
+                        (f"{m.per_stratum[s][0]:.3g}{suffix}<br/>n={int(m.per_stratum[s][1])}"
+                         if s in m.per_stratum else "—") for s in columns])
+            if not rows_:
+                continue
+            head = [Paragraph("Model", styles["cellhead"])] + [
+                Paragraph(c.replace("_", " ").replace(" and ", "<br/>and "),
+                          styles["cellhead"]) for c in columns]
+            body_rows = [[Paragraph(str(v), styles["cell"]) for v in r] for r in rows_]
+            widths = [30 * mm] + [(CONTENT_W - 30 * mm) / max(1, len(columns))] * len(columns)
+            story.append(Paragraph(task.key, styles["h2"]))
+            story.append(_table([head] + body_rows, widths))
+            story.append(Spacer(1, 6))
 
     # ----------------------------------------------------------- 5. gate detail
     story.append(PageBreak())

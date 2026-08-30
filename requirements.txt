@@ -3,6 +3,10 @@
 # number. The resolved versions are recorded in the README and in config/benchmarks.yaml.
 inspect_ai==0.3.260
 inspect_evals==0.18.0
+# inspect_ai's OpenRouter (and OpenAI) providers are optional extras that ship as separate
+# imports. Without this, every cell fails at generation time with a PrerequisiteError --
+# long after the API key check has passed.
+openai>=1.50
 
 # Configuration and data
 python-dotenv>=1.0

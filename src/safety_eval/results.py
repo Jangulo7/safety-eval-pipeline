@@ -53,6 +53,10 @@ class MetricResult:
     direction: str
     unit: str | None = None
     primary: bool = False
+    per_stratum: dict[str, list[float]] = field(default_factory=dict)
+    """``stratum -> [value, n]``. Reported because an aggregate hides whether a benchmark's
+    failure mode is spread evenly or concentrated in one category."""
+
     normalised: float = math.nan
     """Value mapped to 0-1 good-is-high using the catalog range and direction. This is the
     only form in which metrics from different benchmarks may be combined."""
@@ -93,9 +97,35 @@ class CellResult:
     grader_model: str | None = None
     temperature: float | None = None
     seed: int | None = None
+    """Seeds generation. Distinct from ``sample_shuffle``, which selects the samples."""
+
+    sample_shuffle: int | None = None
+    """Seeds the dataset ordering, applied before the limit. Recorded because without it a
+    capped run silently evaluates one stratum of a grouped dataset."""
+
+    epochs: int = 1
+    max_tokens: int | None = None
+    protocol_source: dict[str, str] = field(default_factory=dict)
+    """Per generation parameter: ``task`` when it is the benchmark's own published protocol,
+    ``pipeline`` when this pipeline had to choose because the task specifies none."""
+
+    applied_generate_config: dict[str, Any] = field(default_factory=dict)
+    """The config the harness actually applied, read back from the log rather than assumed.
+    A provider that silently discards a parameter is invisible without this."""
+
+    dataset_fingerprint: str | None = None
+    """Inspect's own dataset identity hash — evidence that two runs used the same items."""
+
+    dataset_samples_total: int | None = None
     max_connections: int | None = None
     n_requested: int = 0
     n_completed: int = 0
+
+    strata_covered: int = 0
+    strata_total: int = 0
+    stratum_counts: dict[str, int] = field(default_factory=dict)
+    """Measured coverage of the dataset's own categories. A cap that touches one stratum is
+    not a run of the benchmark, whatever the headline metric says."""
     inspect_ai_version: str | None = None
     inspect_evals_version: str | None = None
 
@@ -130,6 +160,29 @@ class CellResult:
     @property
     def cell_id(self) -> str:
         return f"{self.task_key}::{self.model_id}"
+
+    @property
+    def conditions(self) -> dict[str, Any]:
+        """The exact parameters this cell was run under, for the report's conditions table."""
+        return {
+            "limit": self.n_requested,
+            "epochs": self.epochs,
+            "temperature": self.temperature,
+            "seed": self.seed,
+            "sample_shuffle": self.sample_shuffle,
+            "max_tokens": self.max_tokens,
+            "max_connections": self.max_connections,
+            "grader_model": self.grader_model,
+            "task_args": dict(self.task_args),
+            "task_version": self.full_task_version,
+            "inspect_ai": self.inspect_ai_version,
+            "inspect_evals": self.inspect_evals_version,
+        }
+
+    @property
+    def stratum_coverage(self) -> float:
+        """Fraction of the dataset's strata this cell actually evaluated."""
+        return self.strata_covered / self.strata_total if self.strata_total else math.nan
 
 
 @dataclass
@@ -214,6 +267,35 @@ class ResultSet:
         m = cell.metric(metric_address)
         return m.value if m else math.nan
 
+    def condition_divergence(self) -> dict[str, dict[str, list[str]]]:
+        """Per task, any run condition that was NOT identical across models.
+
+        A cross-model comparison is only a comparison if the conditions were the same. This
+        is checked from the recorded cells rather than assumed from the config, so a mid-run
+        config edit or a resumed run cannot slip through.
+        """
+        out: dict[str, dict[str, list[str]]] = {}
+        for task_key in self.task_keys:
+            cells = [c for c in self.cells if c.task_key == task_key and c.ok]
+            if len(cells) < 2:
+                continue
+            diverged: dict[str, list[str]] = {}
+            for field_name in ("limit", "epochs", "temperature", "seed", "sample_shuffle",
+                               "grader_model", "task_args", "task_version"):
+                values = {repr(c.conditions[field_name]) for c in cells}
+                if len(values) > 1:
+                    diverged[field_name] = sorted(values)
+            if diverged:
+                out[task_key] = diverged
+        return out
+
+    def under_covered_cells(self, threshold: float = 1.0) -> list[CellResult]:
+        """Cells that evaluated fewer than ``threshold`` of their dataset's strata."""
+        return [
+            c for c in self.cells
+            if c.ok and c.strata_total and c.stratum_coverage < threshold
+        ]
+
     @property
     def mixed_task_versions(self) -> dict[str, set[str]]:
         """Task keys whose cells did not all run the same benchmark version.
@@ -234,6 +316,40 @@ class ResultSet:
     @property
     def total_wall_clock_s(self) -> float:
         return sum(c.wall_clock_s for c in self.cells)
+
+    def sample_sizes(self) -> dict[str, tuple[int, bool]]:
+        """Per task: ``(n, was_capped)``, read from the cells rather than the config.
+
+        A run-level sample cap stopped being meaningful once tasks began capping themselves
+        independently — XSTest runs in full at 250 while sycophancy is capped at 250 of
+        4,882 — so the size of the evidence is reported per benchmark, and whether it was
+        capped is reported with it.
+        """
+        out: dict[str, tuple[int, bool]] = {}
+        for cell in self.cells:
+            if not cell.ok:
+                continue
+            capped = bool(cell.dataset_samples_total
+                          and cell.n_completed < cell.dataset_samples_total)
+            out[cell.task_key] = (cell.n_completed, capped)
+        return out
+
+    def sample_size_note(self) -> str:
+        """One sentence stating the evidence behind every number, honestly per task."""
+        sizes = self.sample_sizes()
+        if not sizes:
+            return "No completed cells."
+        full = [k for k, (_, capped) in sizes.items() if not capped]
+        capped = [k for k, (_, capped) in sizes.items() if capped]
+        parts = [f"`{k}` n = {n}" for k, (n, _) in sorted(sizes.items())]
+        note = "Samples per model: " + ", ".join(parts) + "."
+        if full:
+            note += (f" {', '.join('`' + f + '`' for f in full)} ran the **full dataset**, "
+                     "so those numbers are the benchmark's score rather than a sample of it.")
+        if capped:
+            note += (f" {', '.join('`' + c + '`' for c in capped)} was capped for cost, with "
+                     "a seeded dataset-order shuffle so the subset covers every stratum.")
+        return note
 
     def status_counts(self) -> dict[str, int]:
         counts: dict[str, int] = {}
@@ -287,6 +403,10 @@ class ResultSet:
                 "seed": c.seed,
                 "n_requested": c.n_requested,
                 "n_completed": c.n_completed,
+                "epochs": c.epochs,
+                "sample_shuffle": c.sample_shuffle,
+                "strata": (f"{c.strata_covered}/{c.strata_total}"
+                           if c.strata_total else "—"),
                 "wall_clock_s": round(c.wall_clock_s, 1),
                 "total_tokens": c.total_tokens,
                 "inspect_ai": c.inspect_ai_version,

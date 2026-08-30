@@ -24,7 +24,7 @@ import logging
 import time
 import traceback
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as pkg_version
@@ -84,9 +84,14 @@ class CellPlan:
     task: TaskSpec
     benchmark: BenchmarkSpec
     task_args: dict[str, Any]
-    limit: int
+    limit: int | None
     log_dir: Path
     publish_logs: bool
+    generate: dict[str, Any] = field(default_factory=dict)
+    """Generation parameters from the benchmark's own protocol. Per benchmark, not per run:
+    StrongREJECT is published at temperature 0.75 and XSTest at 0.0."""
+
+    epochs: int = 1
 
     @property
     def cell_id(self) -> str:
@@ -122,7 +127,6 @@ class Runner:
 
     def plan(self) -> list[CellPlan]:
         """Resolve every cell without touching a provider or a dataset."""
-        d = self.config.defaults
         plans: list[CellPlan] = []
         for task, model in [(t, m) for t in self.config.tasks for m in self.config.models]:
             bench = self.catalog[task.benchmark]
@@ -132,9 +136,11 @@ class Runner:
                     task=task,
                     benchmark=bench,
                     task_args=dict(task.args),
-                    limit=d.limit,
+                    limit=self.config.limit_for(task),
                     log_dir=self.config.output.log_dir / task.slug / model.slug,
                     publish_logs=bench.publish_logs,
+                    generate=bench.generate_params(),
+                    epochs=int((bench.protocol.get("epochs") or {}).get("value", 1)),
                 )
             )
         return plans
@@ -151,14 +157,15 @@ class Runner:
             f"inspect_evals {self.versions['inspect_evals']}",
             f"cells             {len(plans)} ({len(self.config.models)} models x "
             f"{len(self.config.tasks)} tasks)",
-            f"samples requested {len(plans) * d.limit} "
-            f"(limit={d.limit}, temperature={d.temperature}, seed={d.seed})",
+            f"samples requested {self.config.estimated_samples()} "
+            f"(seed={d.seed}, dataset-order seed={d.sample_shuffle})",
             "",
-            f"{'cell':<52} {'n':>4}  logs",
+            f"{'cell':<52} {'n':>6}  logs",
         ]
         for p in plans:
             published = "published" if p.publish_logs else "WITHHELD (harmful completions)"
-            lines.append(f"{p.cell_id:<52} {p.limit:>4}  {published}")
+            n = "full" if p.limit is None else str(p.limit)
+            lines.append(f"{p.cell_id:<52} {n:>6}  {published}")
         gated = sorted({p.benchmark.key for p in plans if p.benchmark.gated})
         if gated:
             lines += ["", f"gated datasets: {', '.join(gated)} — run `safety-eval doctor` first"]
@@ -182,7 +189,7 @@ class Runner:
         meta = RunMetadata(
             run_id=self.run_id,
             started_utc=datetime.now(UTC).isoformat(),
-            config_path=str(self.config.source) if self.config.source else None,
+            config_path=_relative_log_path(self.config.source),
             provider=self.config.provider,
             grader_model=self.config.grader_model,
             limit=self.config.defaults.limit,
@@ -247,8 +254,17 @@ class Runner:
             task_args=plan.task_args,
             model=plan.model.id,
             limit=plan.limit,
+            # The benchmark's own generation protocol, identical for every model evaluated
+            # on it. Flattening these to one run-wide number would either break
+            # StrongREJECT's published temperature of 0.75 or make XSTest nondeterministic.
+            **plan.generate,
+            # Seeds the DATASET ORDER, applied before the limit. Without it a capped run
+            # takes the head of a dataset that is grouped by stratum and evaluates one or
+            # two categories -- xstest-safe covers 2 of its 10 prompt types unshuffled.
+            # `seed` below is a different knob: it seeds generation, not sample selection.
+            sample_shuffle=d.sample_shuffle,
+            epochs=plan.epochs,
             max_connections=d.max_connections,
-            temperature=d.temperature,
             seed=d.seed,
             log_dir=str(plan.log_dir),
             fail_on_error=False,     # a bad sample is data, not a reason to lose the cell
@@ -259,6 +275,43 @@ class Runner:
         return logs[0]
 
     # ------------------------------------------------------------------ conversion
+
+    def _per_stratum(self, eval_log: Any, plan: CellPlan, metric: Any) -> dict[str, list[float]]:
+        """Per-category scores for one metric, or empty when the dataset has no strata."""
+        key = plan.benchmark.dataset.get("stratum_key")
+        if not key or not metric.primary:
+            return {}
+        try:
+            from .metrics import per_stratum_scores
+
+            return {k: [round(v, 6), n]
+                    for k, (v, n) in per_stratum_scores(eval_log, metric, key).items()}
+        except Exception:
+            return {}
+
+    def _record_stratum_coverage(self, cell: CellResult, plan: CellPlan, eval_log: Any) -> None:
+        """Measure which of the dataset's own categories this cell actually evaluated.
+
+        Reported rather than assumed. Every one of these datasets is grouped by stratum, so
+        a sample cap applied to the unshuffled head evaluates one or two categories and
+        nothing else -- a number from such a run is not a score on the benchmark, whatever
+        the metric is called. Recording the coverage is what lets a reader check that.
+        """
+        key = plan.benchmark.dataset.get("stratum_key")
+        if not key:
+            return
+        counts = _stratum_counts(eval_log, key)
+        if not counts:
+            return
+        cell.stratum_counts = dict(sorted(counts.items()))
+        cell.strata_covered = len(counts)
+        # The safe and unsafe XSTest subsets have different stratum counts, so the expected
+        # total is taken from the subset where the catalog records one.
+        subset = plan.task.subset or plan.task_args.get("subset")
+        subset_meta = (plan.benchmark.subsets or {}).get(subset or "", {})
+        cell.strata_total = int(
+            subset_meta.get("strata") or plan.benchmark.dataset.get("strata") or 0
+        )
 
     def _blank_cell(self, plan: CellPlan) -> CellResult:
         d = self.config.defaults
@@ -273,10 +326,15 @@ class Runner:
             label=plan.model.label,
             provider=plan.model.provider,
             grader_model=self.config.grader_model,
-            temperature=d.temperature,
             seed=d.seed,
             max_connections=d.max_connections,
-            n_requested=plan.limit,
+            sample_shuffle=d.sample_shuffle,
+            epochs=plan.epochs,
+            temperature=plan.generate.get("temperature"),
+            max_tokens=plan.generate.get("max_tokens"),
+            protocol_source={k: v.get("source", "pipeline")
+                             for k, v in plan.benchmark.protocol.items()},
+            n_requested=plan.limit or 0,
             inspect_ai_version=self.versions["inspect_ai"],
             inspect_evals_version=self.versions["inspect_evals"],
             log_published=plan.publish_logs,
@@ -295,7 +353,29 @@ class Runner:
         if spec is not None:
             cell.task_version = spec.task_version
             cell.full_task_version = (spec.metadata or {}).get("full_task_version")
-            cell.log_path = str(getattr(eval_log, "location", "") or "")
+            # A withheld task records no path to its log. The path is not a transcript,
+            # but it is a pointer to one and it carries the host's filesystem layout into a
+            # published artefact. Records for tasks whose transcripts are not published
+            # carry nothing that leads back to them.
+            if plan.publish_logs:
+                cell.log_path = _relative_log_path(getattr(eval_log, "location", ""))
+
+        # The generation config the harness actually applied, read back rather than assumed.
+        # This is what makes the report's parameter table evidence instead of a restatement
+        # of intent.
+        applied = getattr(spec, "model_generate_config", None) if spec else None
+        if applied is not None:
+            dumped = applied.model_dump() if hasattr(applied, "model_dump") else {}
+            cell.applied_generate_config = {
+                k: v for k, v in dumped.items()
+                if v is not None and k in ("temperature", "max_tokens", "top_p", "top_k",
+                                           "seed", "frequency_penalty", "presence_penalty")
+            }
+
+        dataset = getattr(spec, "dataset", None) if spec else None
+        if dataset is not None:
+            cell.dataset_fingerprint = str(getattr(dataset, "name", "") or "") or None
+            cell.dataset_samples_total = getattr(dataset, "samples", None)
 
         results = getattr(eval_log, "results", None)
         if results is not None:
@@ -307,6 +387,8 @@ class Runner:
                 cell.input_tokens += int(getattr(usage, "input_tokens", 0) or 0)
                 cell.output_tokens += int(getattr(usage, "output_tokens", 0) or 0)
                 cell.total_tokens += int(getattr(usage, "total_tokens", 0) or 0)
+
+        self._record_stratum_coverage(cell, plan, eval_log)
 
         subset = plan.task.subset or plan.task_args.get("subset")
         readings = read_all(eval_log, plan.benchmark.metrics.values(), seed=self.config.defaults.seed)
@@ -328,6 +410,7 @@ class Runner:
                     unit=m.unit,
                     primary=m.primary,
                     normalised=m.normalise(reading.value, subset),
+                    per_stratum=self._per_stratum(eval_log, plan, m),
                 )
             )
 
@@ -339,6 +422,32 @@ class Runner:
                 "`safety-eval doctor --metrics`."
             )
         return cell
+
+
+def _relative_log_path(location: Any) -> str | None:
+    """Record a log path relative to the working directory.
+
+    An absolute path carries the host's filesystem layout into a committed artefact and
+    means nothing to anyone who checks the repository out elsewhere. The relative form is
+    both portable and enough to find the log.
+    """
+    if not location:
+        return None
+    path = Path(str(location))
+    try:
+        return str(path.relative_to(Path.cwd()))
+    except ValueError:
+        return path.name
+
+
+def _stratum_counts(eval_log: Any, key: str) -> dict[str, int]:
+    """Count the dataset strata actually present in a completed log."""
+    counts: dict[str, int] = {}
+    for sample in (getattr(eval_log, "samples", None) or []):
+        value = (getattr(sample, "metadata", None) or {}).get(key)
+        if value is not None:
+            counts[str(value)] = counts.get(str(value), 0) + 1
+    return counts
 
 
 def classify_failure(message: str) -> CellStatus:

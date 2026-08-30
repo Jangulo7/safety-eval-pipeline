@@ -26,7 +26,7 @@ def test_normalisation_respects_direction_and_range(results, config) -> None:
     different scales pointing in two different directions."""
     board = build(results, config)
     top = board.top()
-    assert top.label == "Claude Sonnet 4.5"
+    assert top.label == "Qwen2.5 7B Instruct"
     assert 0.0 <= top.index <= 1.0
 
 
@@ -91,9 +91,10 @@ def test_tie_detection_can_be_switched_off(results, config) -> None:
 def test_a_model_with_no_usable_metric_gets_no_index(messy_results, config) -> None:
     """nan rather than 0.0 — a missing number must never be ranked as a bad one."""
     board = build(messy_results, config)
-    llama = next(r for r in board.rows if "Llama" in r.label)
-    assert math.isnan(llama.index)
-    assert llama.rank_text == "—"
+    # The third model is the one the fixture blocks, errors and dead-graders.
+    unusable = next(r for r in board.rows if "Ministral" in r.label)
+    assert math.isnan(unusable.index)
+    assert unusable.rank_text == "—"
 
 
 def test_partial_coverage_is_flagged(messy_results, config) -> None:
@@ -113,12 +114,19 @@ def test_degraded_grader_produces_a_warning(messy_results, config) -> None:
     assert any("grader scored only" in w for w in warnings)
 
 
-def test_notes_always_state_the_sample_cap_and_that_weights_are_a_choice(
+def test_notes_always_state_the_evidence_and_that_weights_are_a_choice(
     results, config
 ) -> None:
+    """The sample size is stated per benchmark, because they differ.
+
+    A single run-level "n = X, capped for cost" was false in both directions once tasks
+    began capping themselves: it under-reported a full-dataset run and claimed a cap that
+    did not apply.
+    """
     board = build(results, config)
     joined = " ".join(board.notes)
-    assert "capped for cost" in joined
+    assert "Samples per model" in joined
+    assert "n = " in joined
     assert "not a measurement" in joined
 
 

@@ -70,9 +70,12 @@ def test_markdown_reports_every_provenance_column(rendered) -> None:
     assert "inspect_ai" in md and "inspect_evals" in md
 
 
-def test_markdown_states_the_sample_cap(rendered) -> None:
-    assert "capped for cost" in rendered["md"]
-    assert "not a full-benchmark result" in rendered["md"]
+def test_markdown_states_the_sample_size_per_benchmark(rendered) -> None:
+    """Never one run-level number: the benchmarks differ by an order of magnitude."""
+    md = rendered["md"]
+    assert "Samples per model" in md
+    assert "n = " in md
+    assert "full dataset" in md or "capped for cost" in md
 
 
 def test_markdown_explains_why_unscored_exists(rendered) -> None:
@@ -181,6 +184,42 @@ def test_records_for_withheld_tasks_carry_no_log_path(messy_results) -> None:
             assert cell.log_path is None
 
 
+def test_the_runner_itself_withholds_the_log_path(config) -> None:
+    """Asserted against the runner, not the fixture.
+
+    The fixture set `log_path=None` for withheld tasks by construction, so the original
+    test passed while the runner recorded an absolute path to every StrongREJECT log — a
+    pointer to withheld content, carrying the host's filesystem layout, in a published
+    artefact. A test that only exercises its own fixture proves nothing about the code.
+    """
+    from conftest_safety import make_log, make_score
+    from safety_eval.runner import Runner
+
+    def eval_fn(**kwargs):
+        benchmark = kwargs["tasks"].split("/")[-1]
+        scores = {
+            "strong_reject": [make_score("strong_reject_scorer",
+                                         {"jailbreak_rate": 0.1,
+                                          "strong_reject_metric": 0.4})],
+            "xstest": [make_score("model_graded_qa", {"refusal_rate": 12.0})],
+            "sycophancy": [make_score("sycophancy_scorer",
+                                      {"confidence": 0.7, "apologize_rate": 0.3})],
+        }[benchmark]
+        return [make_log(scores, task_version=3 if benchmark == "strong_reject" else 4,
+                         full_task_version="3-A" if benchmark == "strong_reject" else "4-A")]
+
+    results = Runner(config, run_id="run-leak", eval_fn=eval_fn).run()
+    withheld = [c for c in results if not c.log_published]
+    assert withheld, "the matrix must contain a task that withholds transcripts"
+    for cell in withheld:
+        assert cell.log_path is None, (
+            f"{cell.task_key} recorded {cell.log_path!r}, a pointer to a withheld transcript"
+        )
+    assert any(c.log_path for c in results if c.log_published), (
+        "published tasks must still record their log path"
+    )
+
+
 # --------------------------------------------------------------------------------- charts
 
 def test_every_chart_is_produced_and_non_empty(rendered) -> None:
@@ -264,8 +303,8 @@ def test_readme_section_renders_from_a_real_run(results, config) -> None:
     gates = evaluate(results, config)
     section = render_results_section(results, board, gate_passed=gates.passed,
                                      gate_summary=gates.summary())
-    assert "capped for cost" in section
-    assert "not a full-benchmark result" in section
+    assert "Samples per model" in section
+    assert "n = " in section
     assert "Release gate" in section
     for row in board.rows:
         assert row.label in section
@@ -313,3 +352,47 @@ def test_readme_ships_with_no_placeholder_numbers() -> None:
         assert "|" not in body, "an un-run README must not carry an empty results table"
     else:
         assert "Run `run-" in body, "a filled-in results section must name its run id"
+
+
+def test_report_refuses_to_render_a_withheld_log_path(config, results, tmp_path) -> None:
+    """The last gate before anything is written to a file someone might commit."""
+    from safety_eval.pipeline import PublicationError, assert_publishable
+
+    assert_publishable(results)  # the clean fixture must pass
+    for cell in results:
+        if not cell.log_published:
+            cell.log_path = "/home/someone/logs/strong_reject/run.eval"
+            break
+    with pytest.raises(PublicationError, match="withheld"):
+        assert_publishable(results)
+
+
+def test_recorded_log_paths_are_repo_relative(config) -> None:
+    """An absolute path carries the host's filesystem layout into a committed artefact.
+
+    It is also meaningless to anyone who checks the repository out somewhere else, so the
+    provenance it is supposed to provide is lost precisely when it would be needed.
+    """
+    from conftest_safety import make_log, make_score
+    from safety_eval.runner import Runner
+
+    def eval_fn(**kwargs):
+        benchmark = kwargs["tasks"].split("/")[-1]
+        scores = {
+            "strong_reject": [make_score("strong_reject_scorer",
+                                         {"jailbreak_rate": 0.1,
+                                          "strong_reject_metric": 0.4})],
+            "xstest": [make_score("model_graded_qa", {"refusal_rate": 12.0})],
+            "sycophancy": [make_score("sycophancy_scorer",
+                                      {"confidence": 0.7, "apologize_rate": 0.3})],
+        }[benchmark]
+        log = make_log(scores, task_version=4, full_task_version="4-A")
+        log.location = str(Path.cwd() / "logs" / benchmark / "model" / "run.eval")
+        return [log]
+
+    results = Runner(config, run_id="run-rel", eval_fn=eval_fn).run()
+    published = [c for c in results if c.log_published and c.log_path]
+    assert published, "published tasks must record a log path"
+    for cell in published:
+        assert not Path(cell.log_path).is_absolute(), cell.log_path
+        assert str(Path.home()) not in cell.log_path

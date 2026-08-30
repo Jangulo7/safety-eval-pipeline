@@ -27,10 +27,23 @@ from safety_eval.stats import wilson_from_rate
 SYNTHETIC_MARKER = "SYNTHETIC FIXTURE — invented numbers, never publish"
 
 MODELS = [
-    ("openrouter/anthropic/claude-sonnet-4.5", "anthropic", "Claude Sonnet 4.5"),
-    ("openrouter/openai/gpt-4.1", "openai", "GPT-4.1"),
-    ("openrouter/meta-llama/llama-3.3-70b-instruct", "meta", "Llama 3.3 70B"),
+    ("vllm/Qwen/Qwen2.5-7B-Instruct", "qwen", "Qwen2.5 7B Instruct"),
+    ("vllm/meta-llama/Llama-3.1-8B-Instruct", "llama", "Llama 3.1 8B Instruct"),
+    ("vllm/mistralai/Ministral-8B-Instruct-2410", "mistral", "Ministral 8B Instruct"),
 ]
+
+# Named strata per benchmark, so the per-stratum reporting and the F1 disclosure code are
+# exercised against realistic shapes rather than a single bucket.
+STRATA = {
+    "xstest": ["homonyms", "figurative_language", "safe_targets", "safe_contexts",
+               "definitions", "historical_events", "privacy_public", "privacy_fictional",
+               "real_group_nons_discr", "nons_group_real_discr"],
+    "strong_reject": ["Disinformation and deception", "Illegal goods and services",
+                      "Hate, harassment and discrimination", "Non-violent crimes",
+                      "Sexual content", "Violence"],
+    "sycophancy": ["aqua_mc", "math_mc_cot", "mmlu_mc_cot", "trivia_qa", "truthful_qa",
+                   "truthful_qa_mc"],
+}
 
 # (task_key, metric_address) -> per-model value. Chosen so that the calibration trade-off is
 # visible (one over-cautious model, one permissive, one balanced) and so that the default
@@ -126,7 +139,6 @@ def make_results(
                 label=label,
                 provider="openrouter",
                 grader_model=meta.grader_model,
-                temperature=0.0,
                 seed=42,
                 max_connections=8,
                 n_requested=limit,
@@ -140,6 +152,20 @@ def make_results(
                 output_tokens=limit * 95,
                 total_tokens=limit * 415,
                 log_published=bench.publish_logs,
+                sample_shuffle=42,
+                epochs=int((bench.protocol.get("epochs") or {}).get("value", 1)),
+                temperature=(bench.protocol.get("temperature") or {}).get("value"),
+                max_tokens=(bench.protocol.get("max_tokens") or {}).get("value"),
+                protocol_source={k: v.get("source", "pipeline")
+                                 for k, v in bench.protocol.items()},
+                applied_generate_config=bench.generate_params(),
+                dataset_fingerprint=f"{bench_key}_fixture_a1b2c3d4",
+                strata_covered=len(STRATA.get(bench_key, [])),
+                strata_total=int(
+                    (bench.subsets.get(subset or "", {}) or {}).get("strata")
+                    or bench.dataset.get("strata") or 0),
+                stratum_counts={s: max(1, limit // max(1, len(STRATA.get(bench_key, [1]))))
+                                for s in STRATA.get(bench_key, [])},
                 log_path=f"logs/{task_key}/{family}/fixture.eval" if bench.publish_logs else None,
             )
 
@@ -171,6 +197,16 @@ def make_results(
                     scored, unscored = int(limit * 0.8), limit - int(limit * 0.8)
 
                 interval = wilson_from_rate(value, scored, scale=spec.range[1])
+                strata = STRATA.get(bench_key, [])
+                per_stratum = {}
+                if spec.primary and strata and not math.isnan(value):
+                    # Spread the aggregate across the strata with a deterministic wobble, so
+                    # the breakdown is neither uniform nor random between runs.
+                    n_each = max(1, scored // len(strata))
+                    for j, s in enumerate(strata):
+                        wobble = 1.0 + 0.35 * ((j % 3) - 1)
+                        v = max(spec.range[0], min(spec.range[1], value * wobble))
+                        per_stratum[s] = [round(v, 6), n_each]
                 cell.metrics.append(
                     MetricResult(
                         address=address,
@@ -186,6 +222,7 @@ def make_results(
                         direction=spec.direction_for(subset).value,
                         unit=spec.unit,
                         primary=spec.primary,
+                        per_stratum=per_stratum,
                         normalised=spec.normalise(value, subset),
                     )
                 )

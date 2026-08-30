@@ -160,3 +160,21 @@ def test_catalog_records_the_harness_it_was_verified_against(catalog: Catalog) -
     assert catalog.verified_against.get("inspect_ai")
     assert catalog.verified_against.get("inspect_evals")
     assert catalog.verified_against.get("date")
+
+
+def test_sycophancy_records_its_unseeded_shuffle(catalog: Catalog) -> None:
+    """The hazard lives in the catalog so every consumer sees the same warning.
+
+    Measured against inspect_evals 0.18.0: two loads of the shuffled dataset share none of
+    the first 50 samples, so an unpinned matrix scores each model on different prompts.
+    """
+    bench = catalog["sycophancy"]
+    assert bench.order_is_nondeterministic
+    assert bench.order_pinned_by({"shuffle": False})
+    assert not bench.order_pinned_by({})
+    assert "unseeded_shuffle" in {c.id for c in bench.caveats}
+
+
+def test_benchmarks_without_the_hazard_do_not_claim_it(catalog: Catalog) -> None:
+    for key in ("xstest", "strong_reject"):
+        assert not catalog[key].order_is_nondeterministic

@@ -49,11 +49,27 @@ def test_dry_run_names_the_cells_whose_logs_are_withheld(capsys, workdir) -> Non
     assert out.count("WITHHELD") == 3            # one per model on strong_reject
 
 
-def test_doctor_exits_nonzero_when_something_is_missing(capsys, monkeypatch) -> None:
-    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
-    monkeypatch.delenv("HF_TOKEN", raising=False)
-    assert main(["doctor", "--offline"]) == 1
-    assert "preflight" in capsys.readouterr().out
+def test_doctor_exits_nonzero_when_something_is_missing(capsys, monkeypatch, workdir) -> None:
+    """`main()` loads `.env` on the way in, so the loader is stubbed out here.
+
+    That load is what a user wants and it is why this test would otherwise pass vacuously on
+    a developer machine holding real credentials. `chdir` is not enough: python-dotenv's
+    `find_dotenv` walks up from the *module's* own file, not from the working directory, so
+    it finds the project `.env` wherever the test runs from.
+    """
+    monkeypatch.setattr("safety_eval.cli._load_env", lambda: None)
+    for var in ("OPENROUTER_API_KEY", "HF_TOKEN", "HUGGING_FACE_HUB_TOKEN",
+                "VLLM_BASE_URL"):
+        monkeypatch.delenv(var, raising=False)
+
+    root = Path(__file__).resolve().parents[1]
+    code = main(["--config", str(root / "config" / "eval_config.yaml"),
+                 "--catalog", str(root / "config" / "benchmarks.yaml"),
+                 "doctor", "--offline"])
+    out = capsys.readouterr().out
+    assert code == 1
+    assert "preflight" in out
+    assert "VLLM_BASE_URL is not set" in out
 
 
 def test_report_and_gate_from_a_saved_run(workdir, catalog, capsys) -> None:
@@ -99,5 +115,5 @@ def test_task_subset_scopes_the_run(capsys, workdir) -> None:
     main(["run", "--dry-run", "--tasks", "sycophancy", "--limit", "5"])
     out = capsys.readouterr().out
     assert "cells             3" in out
-    assert "samples requested 15" in out
+    assert "samples requested 15" in out  # 3 models x limit 5
     assert "xstest" not in out.split("gated datasets")[0]

@@ -144,6 +144,19 @@ def cmd_run(args: argparse.Namespace) -> int:
         print("  Nothing was run and nothing was spent. Drop --dry-run to execute.\n")
         return 0
 
+    # The reproducibility gate runs before the spend and cannot be skipped by --skip-doctor.
+    # doctor answers "can this run"; this answers "will the numbers mean anything", and a
+    # run that cannot produce comparable numbers is not worth starting.
+    from .reproducibility import check_config
+
+    verdict = check_config(config)
+    print(verdict.render())
+    if not verdict.reproducible and not args.allow_irreproducible:
+        return 1
+    if not verdict.reproducible:
+        print("\n  --allow-irreproducible was passed: continuing with a run whose results "
+              "are NOT a like-for-like comparison.\n")
+
     if not args.skip_doctor:
         d = diagnose(config, check_network=not args.offline)
         if not d.ok:
@@ -240,6 +253,71 @@ def cmd_gate(args: argparse.Namespace) -> int:
     return report_.exit_code
 
 
+def cmd_run_local(args: argparse.Namespace) -> int:
+    """Serve each local model in turn and evaluate the whole matrix against it."""
+    from .doctor import diagnose
+    from .local_runner import LocalMatrixRunner
+    from .pipeline import report
+    from .reproducibility import check_config
+
+    config = _config(args)
+    verdict = check_config(config)
+    print(verdict.render())
+    if not verdict.reproducible and not args.allow_irreproducible:
+        return 1
+
+    if not args.skip_doctor:
+        # Datasets and the grader key are checked; the vLLM server is not, because this
+        # command is the thing that starts it.
+        d = diagnose(config, check_network=not args.offline)
+        blocking = [c for c in d.failures if c.name != "vllm server"]
+        if blocking:
+            print("\npreflight failed:\n")
+            print(d.render())
+            return 1
+
+    print(f"\nserving {len(config.models)} model(s) sequentially · "
+          f"{len(config.cells)} cells · {config.estimated_samples()} samples requested")
+    runner = LocalMatrixRunner(config, port=args.port, purge=args.purge)
+    summary = runner.run()
+
+    print(f"\n  {', '.join(f'{v} {k}' for k, v in sorted(summary.results.status_counts().items()))}"
+          f" · {summary.results.total_tokens:,} tokens")
+    if summary.fetched:
+        print(f"  downloaded: {', '.join(summary.fetched)}")
+    if summary.kept:
+        print(f"  kept on disk: {', '.join(summary.kept)}")
+    if summary.purged:
+        print(f"  purged: {', '.join(summary.purged)}")
+    for repo, why in summary.failures.items():
+        print(f"  FAILED {repo}: {why}")
+    print(f"  results written to {summary.run_dir / 'results.json'}\n")
+
+    if args.report:
+        art = report(config, run_dir=summary.run_dir)
+        for name, path in art.files.items():
+            print(f"  {name:<12} {path}")
+        print(f"\n  gate: {'PASS' if art.gate_report.passed else 'FAIL'} — "
+              f"{art.gate_report.summary()}\n")
+    return 0
+
+
+def cmd_check(args: argparse.Namespace) -> int:
+    """Run the reproducibility gate without running anything else."""
+    from .reproducibility import check_config, check_results
+    from .results import ResultSet, resolve_run_dir
+
+    config = _config(args)
+    if getattr(args, "run_id", None):
+        run_dir = resolve_run_dir(config.output.results_dir, args.run_id)
+        verdict = check_results(ResultSet.load(run_dir / "results.json"), config)
+        print(f"\nchecking recorded conditions of {run_dir.name}")
+    else:
+        verdict = check_config(config)
+    print(verdict.render())
+    return verdict.exit_code
+
+
 def cmd_ui(args: argparse.Namespace) -> int:
     import subprocess
 
@@ -289,6 +367,9 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--seed", type=int)
     r.add_argument("--max-connections", type=int, dest="max_connections")
     r.add_argument("--skip-doctor", action="store_true", help="run without preflight checks")
+    r.add_argument("--allow-irreproducible", action="store_true",
+                   help="run even when the reproducibility gate blocks. The results will "
+                        "not be a like-for-like comparison and every artefact says so.")
     r.add_argument("--offline", action="store_true")
     r.add_argument("--report", action="store_true", help="render the report after running")
     r.add_argument("--no-charts", action="store_true")
@@ -310,6 +391,33 @@ def build_parser() -> argparse.ArgumentParser:
     g = sub.add_parser("gate", help="evaluate thresholds; exit 1 on a breach")
     g.add_argument("--run-id", default=None)
     g.set_defaults(func=cmd_gate)
+
+    rl = sub.add_parser(
+        "run-local",
+        help="serve each local model in turn with vLLM and run the matrix against it")
+    rl.add_argument("--port", type=int, default=8000)
+    rl.add_argument("--purge", action="store_true",
+                    help="delete weights after evaluating a model — only ever weights this "
+                         "run downloaded; anything already cached is left alone")
+    rl.add_argument("--models", nargs="+")
+    rl.add_argument("--tasks", nargs="+")
+    rl.add_argument("--limit", type=int)
+    rl.add_argument("--seed", type=int)
+    rl.add_argument("--max-connections", type=int, dest="max_connections")
+    rl.add_argument("--skip-doctor", action="store_true")
+    rl.add_argument("--offline", action="store_true")
+    rl.add_argument("--allow-irreproducible", action="store_true")
+    rl.add_argument("--report", action="store_true", default=True)
+    rl.add_argument("--no-charts", action="store_true")
+    rl.add_argument("--no-html", action="store_true")
+    rl.add_argument("--no-pdf", action="store_true")
+    rl.set_defaults(func=cmd_run_local)
+
+    rc = sub.add_parser(
+        "check", help="reproducibility gate: will this run produce comparable numbers?")
+    rc.add_argument("--run-id", default=None,
+                    help="check a completed run's recorded conditions instead of the config")
+    rc.set_defaults(func=cmd_check)
 
     u = sub.add_parser("ui", help="launch the Streamlit dashboard")
     u.add_argument("--port", type=int, default=8501)

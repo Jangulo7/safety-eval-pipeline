@@ -45,8 +45,7 @@ def render_results_section(
         f"Run `{meta.run_id}` · {meta.finished_utc or meta.started_utc} · "
         f"`inspect_ai` {meta.inspect_ai_version}, `inspect_evals` {meta.inspect_evals_version}",
         "",
-        f"**n = {meta.limit} samples per task per model, capped for cost — not a "
-        f"full-benchmark result.** Grader: `{meta.grader_model}`, temperature "
+        f"{results.sample_size_note()} Grader: `{meta.grader_model}`, temperature "
         f"{next((c.temperature for c in results), 0)}, seed {next((c.seed for c in results), 0)}.",
         "",
         f"**Release gate: {'PASS' if gate_passed else 'FAIL'}** — {gate_summary}. "

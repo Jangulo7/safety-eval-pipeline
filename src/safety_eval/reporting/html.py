@@ -16,14 +16,18 @@ import base64
 import math
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from ..config import RunConfig
+from ..disclosure import contamination_disclosure, parameter_register
 from ..gates import GateOutcome, GateReport
 from ..leaderboard import Leaderboard
 from ..results import CellStatus, ResultSet
 from . import theme
+from .conditions import COVERAGE_NOTE, PREAMBLE
+from .conditions import build as build_conditions
 
 TEMPLATE_DIR = Path(__file__).parent / "templates"
 
@@ -155,7 +159,73 @@ def render_leaderboard_html(
                     "caption": caption["caption"],
                 })
 
+    cond = build_conditions(results, config)
+    conditions = {
+        "preamble": PREAMBLE,
+        "coverage_note": COVERAGE_NOTE.replace("**", ""),
+        "shared": cond.shared,
+        "all_identical": cond.all_identical,
+        "divergence": [
+            f"{task_key} · {field_name}: {', '.join(values)}"
+            for task_key, diverged in cond.divergence.items()
+            for field_name, values in diverged.items()
+        ],
+        "under_covered": cond.under_covered,
+        "tasks": [{
+            "key": tc.task_key,
+            "rows": tc.rows,
+            "coverage": tc.coverage_text,
+            "fully_covered": tc.fully_covered,
+            "strata": ", ".join(f"{k} {v}" for k, v in tc.stratum_counts.items()),
+        } for tc in cond.tasks],
+    }
+
+    has_strata = any(m.per_stratum for c in results for m in c.metrics)
+    disc = contamination_disclosure(results, config, per_stratum=has_strata)
+    disclosure = {
+        "rows": [{"name": n, "code": c, "why": w} for n, c, w in disc.rows()],
+        "f2_notes": disc.f2_notes,
+        "headline": disc.headline,
+    }
+    register: list[dict[str, Any]] = []
+    section = None
+    for row in parameter_register(results, config):
+        if row.section != section:
+            section = row.section
+            register.append({"section": section, "rows": []})
+        register[-1]["rows"].append(
+            {"parameter": row.parameter, "value": row.value, "status": row.status,
+             "cls": {"recorded": "pass", "not applicable": "",
+                     "undisclosed": "blocked", "missing": "fail"}[row.status]})
+
+    strata_tables = []
+    for task in config.tasks:
+        rows_, columns = [], []
+        for model_id in results.models:
+            cell = results.get(task.key, model_id)
+            if cell is None or not cell.ok:
+                continue
+            for m in cell.metrics:
+                if not m.per_stratum:
+                    continue
+                columns = columns or sorted(m.per_stratum)
+                suffix = "%" if m.unit == "percent" else ""
+                # NB "cells", not "values": Jinja resolves a dict's .values to the method.
+                rows_.append({"label": cell.label, "metric": m.label, "cells": [
+                    (f"{m.per_stratum[s][0]:.3g}{suffix}", int(m.per_stratum[s][1]))
+                    if s in m.per_stratum else ("—", 0) for s in columns]})
+        if rows_:
+            strata_tables.append({"task": task.key, "metric": rows_[0]["metric"],
+                                  "columns": columns, "rows": rows_})
+
     warnings = _warnings(results, board)
+    if not cond.all_identical:
+        warnings.insert(0, "<b>Run conditions were not identical across models.</b> The "
+                           "ranking below is not like-for-like — see Run conditions.")
+    if cond.under_covered:
+        warnings.append(
+            "<b>Incomplete stratum coverage.</b> " + "; ".join(cond.under_covered)
+            + ". Those cells scored the categories they reached, not the whole benchmark.")
 
     return template.render(
         index_name=board.index_name,
@@ -165,7 +235,7 @@ def render_leaderboard_html(
         inspect_evals_version=meta.inspect_evals_version or "—",
         pipeline_version=meta.pipeline_version or "—",
         grader_model=meta.grader_model or "—",
-        limit=meta.limit,
+        limit=results.sample_size_note().replace('**', ''),
         temperature=next((c.temperature for c in results), 0.0),
         seed=next((c.seed for c in results), 0),
         n_models=len(results.models),
@@ -184,6 +254,10 @@ def render_leaderboard_html(
         gate_passed=gate_report.passed,
         gate_summary=gate_report.summary(),
         provenance=provenance,
+        conditions=conditions,
+        disclosure=disclosure,
+        register=register,
+        strata_tables=strata_tables,
         limitations=LIMITATIONS,
         theme="light",
     )

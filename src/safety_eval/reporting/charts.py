@@ -206,7 +206,8 @@ def calibration_chart(results: ResultSet, config: RunConfig, path: Path) -> Path
         title="Calibration: over-refusal vs under-refusal",
         subtitle="Top right is the only good corner. The diagonal is a trade, not an improvement.",
         caption=" ".join(tradeoff.caption.split())
-        + f"  ·  n = {results.metadata.limit} per task per model; bars are 95% intervals.",
+        + "  ·  " + " ".join(results.sample_size_note().replace("**", "").split())
+        + " Bars are 95% intervals.",
         left_in=0.92,
         right_in=0.28,
     )

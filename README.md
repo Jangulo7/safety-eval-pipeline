@@ -47,16 +47,30 @@ that produces vague text is not the same failure as one that produces a working 
 ## Results
 
 <!-- RESULTS:BEGIN -->
-**Not yet run on this machine.** This section is generated from `results/latest/results.json`
-and is deliberately empty until a real run produces one. There are no placeholder numbers in
-this repository.
+Run `run-20260830-193016` · 2026-08-30T19:52:32.444202+00:00 · `inspect_ai` 0.3.260, `inspect_evals` 0.18.0
 
-To produce it:
+Samples per model: `strong_reject` n = 313, `sycophancy` n = 250, `xstest_safe` n = 250, `xstest_unsafe` n = 200. `xstest_safe`, `xstest_unsafe`, `strong_reject` ran the **full dataset**, so those numbers are the benchmark's score rather than a sample of it. `sycophancy` was capped for cost, with a seeded dataset-order shuffle so the subset covers every stratum. Grader: `openrouter/openai/gpt-4.1-mini`, temperature 0.0, seed 42.
 
-```bash
-make doctor          # confirm credentials and dataset access first
-make run             # 3 models × 4 benchmarks × n=50
-```
+**Release gate: FAIL** — 9 passed, 3 failed, 0 could not be evaluated. Thresholds are illustrative defaults, not safety claims.
+
+| rank | model | Safety Index | xstest_safe · Refusal rate | xstest_unsafe · Refusal rate | strong_reject · StrongREJECT score | sycophancy · Apologize rate |
+|---|---|---|---|---|---|---|
+| =1 | Qwen2.5 7B Instruct | 0.845 | 4.8% | 82% | 0.3317 | 0.3916 |
+| =1 | Llama 3.1 8B Instruct | 0.828 | 8% | 96.5% | 0.1214 | 0.6776 |
+| 2 | Ministral 8B Instruct | 0.734 | 4.8% | 83% | 1.468 | 0.6148 |
+
+_Weights: `xstest_safe` 25%, `xstest_unsafe` 25%, `strong_reject` 30%, `sycophancy` 20%._
+_The Safety Index is a weighted mean of metrics normalised to 0-1 (1 = better) using the range and direction recorded in `config/benchmarks.yaml`. The weighting is a choice, not a measurement._
+_Samples per model: `strong_reject` n = 313, `sycophancy` n = 250, `xstest_safe` n = 250, `xstest_unsafe` n = 200. `xstest_safe`, `xstest_unsafe`, `strong_reject` ran the **full dataset**, so those numbers are the benchmark's score rather than a sample of it. `sycophancy` was capped for cost, with a seeded dataset-order shuffle so the subset covers every stratum._
+_Models whose 95% intervals overlap share a rank and are marked `=`. At this sample size that is common, and reporting them as ordered would be a false claim._
+
+![Over-refusal against under-refusal](results/published/charts/calibration.png)
+
+_A single safety score hides a trade-off between over-refusal and under-refusal. Top right is the only good corner; movement along the diagonal is a trade, not an improvement._
+
+Full record set with every provenance column: [`results/published/results.md`](results/published/results.md) · [gate report](results/published/gate_report.md) · [leaderboard.html](results/published/leaderboard.html) · [report.pdf](results/published/report.pdf)
+
+Cells: 12 ok · 3,486,821 tokens · 17.9 min wall-clock.
 <!-- RESULTS:END -->
 
 ---
@@ -126,6 +140,12 @@ Four things here cost real time to rediscover, so they are encoded in
    a parseable judge verdict. Rendered as `0.0` it would read as "refused everything" — the
    opposite of what happened.
 
+`safety-eval doctor` also constructs each provider before the run rather than only checking
+its API key: `inspect_ai` ships provider integrations as optional extras, so a missing
+package surfaces as a `PrerequisiteError` at *generation* time — after the credential check
+has passed, after the dataset has downloaded, and once per cell. That failure is worth ten
+seconds up front. (It was found the hard way; the check exists because of it.)
+
 `safety-eval doctor --metrics` runs every benchmark against Inspect's `mockllm` provider and
 diffs the metric addresses the installed harness *really* emits against the catalog. It costs
 nothing, needs no credentials, and is the only way to know the catalog still describes the
@@ -164,12 +184,14 @@ src/safety_eval/
   config.py       strict validation — a typo or a unit mistake fails before any spend
   stats.py        Wilson + bootstrap intervals; conservative tie detection
   metrics.py      reads metrics out of an EvalLog: namespacing, denominators, nan
+  results.py      the record schema and results.json — the single source of truth
   runner.py       the matrix: per-cell isolation, retry-once, blocked vs error
   gates.py        thresholds; exit 1 on a breach
   leaderboard.py  normalisation, weighting, tie detection
-  doctor.py       preflight: credentials, gated datasets, metric-name drift
+  doctor.py       preflight: credentials, provider extras, gated datasets, metric drift
   pipeline.py     run → report → gate, shared by the CLI and the dashboard
-  reporting/      charts, markdown, self-contained HTML, PDF
+  readme.py       generates this file's results section from results.json
+  reporting/      theme, charts, markdown, self-contained HTML, PDF
   cli.py          safety-eval
 
 app/streamlit_app.py       the dashboard
@@ -256,6 +278,7 @@ Pinned versions — a score is a property of the harness as much as of the model
 |---|---|
 | `inspect_ai` | `0.3.260` |
 | `inspect_evals` | `0.18.0` |
+| `openai` | `>=1.50` — `inspect_ai` ships its OpenRouter provider as an optional extra |
 | Python | 3.11+ |
 
 ### XSTest needs dataset access
@@ -311,11 +334,11 @@ Two deliberate behaviours:
 ## Tests
 
 ```bash
-make test        # 210 tests, no provider, no cost
+make test        # 222 tests, no provider, no cost
 make test-all    # plus the integration tests (hits OpenRouter)
 ```
 
-The 48 tests from the pre-Inspect pipeline still pass, unmodified. The 162 new ones run
+The 48 tests from the pre-Inspect pipeline still pass, unmodified. The 174 new ones run
 entirely offline — against fixtures and Inspect's `mockllm` provider — and cover config
 validation, interval maths against published Wilson values, metric extraction including
 namespaced keys and `nan`, matrix execution with per-cell failure isolation, gate evaluation,
