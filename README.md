@@ -1,7 +1,7 @@
 # EvalPipelineAA
-A fully automated pipeline designed to benchmark new models uploaded to our S3 artifact store.
+A fully automated pipeline designed to benchmark new models uploaded to a dedicated S3 artifact store.
 
-This repository hosts the Overnight Evaluation Queue, a fully automated pipeline designed to benchmark new quantized Large Language Models (LLMs) uploaded to our S3 artifact store. It executes Artificial Analysis compliant benchmarks (MMLU, GSM8K, HumanEval) to assess the degradation of Quality vs. Quantization Efficiency.
+This repository hosts an Evaluation Queue, a fully automated pipeline designed to benchmark Large Language Models (LLMs) uploaded to a dedicated S3 artifact store. It executes benchmarks (MMLU, GSM8K, HumanEval) to perform the model capacity comparisons.
 
 Overview
 The pipeline operates on a "Just-In-Time" architecture to maximize resource efficiency. It wakes up nightly, scans for fresh models, isolates them in ephemeral GPU processes, and publishes the results to a visual dashboard.
@@ -26,8 +26,7 @@ Component
 3. Worker (worker): "The heavy lifter. It claims the GPU, downloads the model, runs the eval, and uploads JSON results."
 4. Dashboard (dashboard): "A Streamlit app that visualizes ""Quality vs. Quantization"" trade-offs."
 
-Benchmark Coverage (Artificial Analysis)
-We adhere to the Artificial Analysis Intelligence Index methodology to ensure our internal metrics map to external standards.
+Benchmark Coverage 
 It supports the following bechmarks: MMLU (5-shot), GSM8K (5-shot), HumanEval (0-shot), HellaSwag (10-shot).
 
 Getting Started
