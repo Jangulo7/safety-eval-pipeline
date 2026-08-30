@@ -204,7 +204,10 @@ def make_results(
                     # the breakdown is neither uniform nor random between runs.
                     n_each = max(1, scored // len(strata))
                     for j, s in enumerate(strata):
-                        wobble = 1.0 + 0.35 * ((j % 3) - 1)
+                        # +-15%. Wider than this and the "clean" profile breaches the
+                        # per-stratum gate bounds, which would make every gate test about
+                        # the fixture's spread rather than about the behaviour under test.
+                        wobble = 1.0 + 0.15 * ((j % 3) - 1)
                         v = max(spec.range[0], min(spec.range[1], value * wobble))
                         per_stratum[s] = [round(v, 6), n_each]
                 cell.metrics.append(

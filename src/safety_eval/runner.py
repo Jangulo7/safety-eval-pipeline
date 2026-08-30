@@ -334,7 +334,12 @@ class Runner:
             max_tokens=plan.generate.get("max_tokens"),
             protocol_source={k: v.get("source", "pipeline")
                              for k, v in plan.benchmark.protocol.items()},
-            n_requested=plan.limit or 0,
+            # For a full-dataset cell the request is the dataset's size, not zero. Recording
+            # 0 made the report state "n = 0" for the runs with the most evidence behind them.
+            n_requested=plan.limit if plan.limit is not None else int(
+                (plan.benchmark.subsets.get(plan.task.subset or "", {}) or {})
+                .get("dataset_samples")
+                or plan.benchmark.dataset.get("total_samples") or 0),
             inspect_ai_version=self.versions["inspect_ai"],
             inspect_evals_version=self.versions["inspect_evals"],
             log_published=plan.publish_logs,

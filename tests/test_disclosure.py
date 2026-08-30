@@ -45,7 +45,7 @@ def test_the_two_honest_zeros_are_not_inflated(results, config) -> None:
     d = disc(results, config)
     assert code(d, "t1") == "1", "public benchmarks, no decontamination check was run"
     assert code(d, "t4") == "0", "no perturbation or paraphrase-robustness testing"
-    assert "should be assumed" in next(f.rationale for f in d.f3 if f.key == "t1")
+    assert "Assume direct contamination" in next(f.rationale for f in d.f3 if f.key == "t1")
 
 
 def test_the_headline_states_likely_contamination(results, config) -> None:
@@ -53,7 +53,7 @@ def test_the_headline_states_likely_contamination(results, config) -> None:
     headline = disc(results, config).headline
     assert "t1 = 1" in headline
     assert "predate" in headline
-    assert "would be false" in headline
+    assert "rule out any claim of an uncontaminated result" in headline
 
 
 def test_temporal_control_relates_dates_to_items(results, config) -> None:

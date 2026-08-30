@@ -10,7 +10,12 @@ from __future__ import annotations
 import math
 
 from ..config import RunConfig
-from ..disclosure import contamination_disclosure, parameter_register
+from ..disclosure import (
+    DISCLOSURE_SCHEMA_CITATION,
+    DISCLOSURE_SCHEMA_URL,
+    contamination_disclosure,
+    parameter_register,
+)
 from ..results import CellStatus, ResultSet
 from .conditions import COVERAGE_NOTE, PREAMBLE
 from .conditions import build as build_conditions
@@ -77,15 +82,13 @@ def render_results_markdown(results: ResultSet, config: RunConfig) -> str:
         "## What is recorded with every score",
         "",
         "A score is a joint property of the model, the harness, the grader, the prompt "
-        "sample and the decoding parameters. Publishing the score alone is not "
-        "reproducible, so the columns above travel with it.",
+        "sample and the decoding parameters. The score alone is not reproducible, so the "
+        "columns above travel with it.",
         "",
-        "`unscored` is the column that costs the most to leave out. Since "
-        "`inspect_ai >= 0.3.245`, a grader completion with no parseable `GRADE:` verdict is "
-        "`Score.unscored()` rather than a full refusal, so it leaves the metric's "
-        "denominator entirely. Grader degradation and genuine compliance now move XSTest's "
-        "`refusal_rate` in the *same* direction; `unscored` is the only way to tell them "
-        "apart.",
+        "`unscored` costs the most to omit. Since `inspect_ai >= 0.3.245`, an unparseable "
+        "grader verdict yields `Score.unscored()` rather than a full refusal, so the sample "
+        "leaves the denominator. Grader degradation and genuine compliance now move "
+        "`refusal_rate` in the same direction. Only `unscored` separates them.",
     ]
 
     if degraded := _degraded(results):
@@ -142,9 +145,9 @@ def _stratum_section(results: ResultSet, config: RunConfig) -> list[str]:
         if not lines:
             lines += ["", "## Scores by stratum", "",
                       "Each benchmark broken down by its own categories. An aggregate "
-                      "refusal rate does not say whether refusals were spread evenly or "
-                      "concentrated in one prompt type — which, for a benchmark built to "
-                      "locate over-refusal, is the finding rather than a detail.", ""]
+                      "refusal rate cannot say whether refusals spread evenly or "
+                      "concentrated in one prompt type. For a benchmark built to locate "
+                      "over-refusal, that distinction is the finding.", ""]
         strata = sorted({s for _, _, ps in rows for s in ps})
         suffix = "%" if rows[0][1].unit == "percent" else ""
         lines += [f"### `{task.key}` · {rows[0][1].label}", "",
@@ -168,15 +171,17 @@ def _disclosure_section(results: ResultSet, config: RunConfig) -> list[str]:
     has_strata = any(m.per_stratum for c in results for m in c.metrics)
     d = contamination_disclosure(results, config, per_stratum=has_strata)
     lines = ["", "## Contamination disclosure", "",
-             "Coded against the four-field disclosure schema, computed from what this run "
-             "recorded rather than asserted. A control that was not applied is coded `0`; "
-             "an honest `0` beside a named mechanism is worth more than an unearned `2`.",
+             DISCLOSURE_SCHEMA_CITATION,
+             "",
+             "An unapplied control is coded `0`. An honest `0` beside a named mechanism "
+             "is worth more than an unearned `2`.",
              "", "| field | code | basis |", "|---|---|---|"]
     lines += [f"| {name} | **{code}** | {why} |" for name, code, why in d.rows()]
     lines += ["", f"`f2_notes`: **`{d.f2_notes}`** — the five elicitation sub-elements in "
                   "order: system identity, version, token budget, attempts, attempt "
                   "resolution.",
-              "", f"> {d.headline}"]
+              "", f"> {d.headline}",
+              "", f"Schema: <{DISCLOSURE_SCHEMA_URL}>"]
     return lines
 
 
@@ -185,10 +190,9 @@ def _register_section(results: ResultSet, config: RunConfig) -> list[str]:
     rows = parameter_register(results, config)
     lines = ["", "## Parameter register", "",
              "The register from this repository's pre-Inspect pipeline, filled from this "
-             "run. It assumes a locally-served quantized model, so a row's applicability "
-             "depends on the serving arrangement — and a blank row and a not-applicable "
-             "row are different claims, so every row that cannot be filled carries its "
-             "reason.", ""]
+             "run. It assumes a locally-served quantized model, so applicability depends on "
+             "the serving arrangement. A blank row and a not-applicable row make different "
+             "claims, so every unfilled row states its reason.", ""]
     section = None
     for row in rows:
         if row.section != section:

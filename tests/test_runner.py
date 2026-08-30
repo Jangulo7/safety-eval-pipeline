@@ -222,3 +222,34 @@ def test_error_messages_are_truncated(config: RunConfig, monkeypatch) -> None:
     monkeypatch.setattr("time.sleep", lambda *_: None)
     results = Runner(config, eval_fn=failing_eval("x" * 5000)).run()
     assert len(results.cells[0].error_message) <= 501
+
+
+def test_a_full_dataset_cell_records_the_dataset_size_not_zero(config, catalog) -> None:
+    """`limit: null` means "all of it", and the record must say how many that was.
+
+    Recording 0 made the report state "n = 0 samples" for precisely the cells with the most
+    evidence behind them — the inverse of the truth.
+    """
+    from pathlib import Path
+
+    import yaml
+
+    from safety_eval.config import RunConfig
+
+    data = yaml.safe_load(Path(config.source).read_text())
+    data["defaults"]["limit"] = None
+    for task in data["tasks"]:
+        task.pop("limit", None)
+    path = Path(config.source).parent / "_full.yaml"
+    path.write_text(yaml.safe_dump(data))
+    try:
+        full = RunConfig.load(path, catalog)
+        results = Runner(full, run_id="run-full", eval_fn=stub_eval).run()
+        for cell in results:
+            expected = catalog[cell.benchmark].dataset["total_samples"]
+            subset = (catalog[cell.benchmark].subsets.get(
+                full.task(cell.task_key).subset or "", {}) or {})
+            expected = subset.get("dataset_samples", expected)
+            assert cell.n_requested == expected, f"{cell.task_key} recorded {cell.n_requested}"
+    finally:
+        path.unlink(missing_ok=True)

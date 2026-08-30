@@ -2,12 +2,16 @@
 
 Two disclosure frameworks travel with every report:
 
-**Contamination disclosure** (``.private/Contamination-disclosure.txt``) — four fields that
+**Contamination disclosure** — four fields that
 determine whether one evaluation's numbers can honestly be set beside another's: whether
 results are broken down by stratum (F1), whether the elicitation conditions are
 reproducible (F2), what contamination controls were applied (F3, five types), and whether
 the instrument can be regenerated (F4). The codes are computed from what the run actually
 recorded, not asserted — so a change that stops recording something lowers the score.
+
+The schema is published at https://zenodo.org/records/21750019 and every artefact this
+pipeline emits cites it beside the codes, because a code is meaningless without the rubric
+that defines it.
 
 **Parameter Register** — the field list from this repository's pre-Inspect README, written
 for locally-served quantized models. Roughly half of it is inapplicable to a hosted model
@@ -25,6 +29,14 @@ from typing import Any
 
 from .config import RunConfig
 from .results import CellStatus, ResultSet
+
+DISCLOSURE_SCHEMA_URL = "https://zenodo.org/records/21750019"
+DISCLOSURE_SCHEMA_CITATION = (
+    "Coded against the contamination-disclosure schema, "
+    f"{DISCLOSURE_SCHEMA_URL}: four fields (F1 strata reported, F2 elicitation budget, "
+    "F3 contamination controls over five types, F4 regeneration). This pipeline computes "
+    "the codes from what the run recorded rather than asserting them."
+)
 
 # Publication dates of the instruments, for the temporal-contamination assessment (F3/t3).
 BENCHMARK_DATES = {
@@ -122,27 +134,25 @@ def contamination_disclosure(
     f3 = [
         Field("t1", "F3 · t1 Direct", "1",
               "No overlap check, canary string or private held-out set. All three "
-              "instruments are public and predate the training cutoffs of every model "
-              "under test, so direct contamination should be assumed rather than excluded. "
-              "Named, uncontrolled."),
+              "instruments are public and predate every model's training cutoff. Assume "
+              "direct contamination. Named, uncontrolled."),
         Field("t2", "F3 · t2 Derivative",
               "2" if fingerprinted else "1",
-              "Item provenance is tracked: dataset source and Inspect's content "
-              "fingerprint are recorded per cell, so two runs can be shown to have used "
-              "the same items."
+              "Provenance tracked: each cell records the dataset source and Inspect's "
+              "content fingerprint, so two runs can be shown to use the same items."
               if fingerprinted else
               "Sources are named but no content fingerprint is recorded."),
         Field("t3", "F3 · t3 Temporal", "2",
-              f"Instrument publication dates are stated and related to the items: {dated}. "
-              "All three predate the stated training cutoffs of all models under test, so "
-              "the relation is that contamination is likely, not excluded."),
+              f"Publication dates stated and related to the items: {dated}. All three "
+              "predate every model's stated training cutoff, so contamination is likely "
+              "rather than excluded."),
         Field("t4", "F3 · t4 Distributional", "0",
               "No perturbation, paraphrase-robustness or template-novelty testing was "
               "performed. Recorded as 0 rather than inflated."),
         Field("t5", "F3 · t5 Acquired", "2",
-              "The solver chain is system_message then generate(). No tools, no retrieval "
-              "and no network access were available to the evaluated model during scoring. "
-              "Control stated; not established by transcript review."),
+              "The solver chain is system_message then generate(). The evaluated model had "
+              "no tools, no retrieval and no network access during scoring. Control stated; "
+              "not established by transcript review."),
     ]
 
     # --- F4: regeneration ----------------------------------------------------------------
@@ -155,11 +165,11 @@ def contamination_disclosure(
                "The regeneration status of some instruments is not stated.")
 
     headline = (
-        "The load-bearing code is **t1 = 1**. These are public benchmarks that predate the "
-        "training cutoff of every model evaluated, and no decontamination check was run. "
-        "Some direct contamination should be assumed. That does not void the measurement — "
-        "a model that has seen XSTest and still over-refuses is still over-refusing — but "
-        "any claim of an uncontaminated result would be false."
+        "**t1 = 1 is the load-bearing code.** These benchmarks are public and predate every "
+        "model's training cutoff, and no decontamination check ran. Assume some direct "
+        "contamination. This does not void the measurement: a model that has seen XSTest "
+        "and still over-refuses still over-refuses. It does rule out any claim of an "
+        "uncontaminated result."
     )
     return ContaminationDisclosure(f1=f1, f2=f2, f2_notes=f2_notes, f3=f3, f4=f4,
                                    headline=headline)

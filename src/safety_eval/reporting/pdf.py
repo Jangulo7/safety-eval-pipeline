@@ -39,7 +39,12 @@ from reportlab.platypus import (
 
 from ..catalog import Direction
 from ..config import RunConfig
-from ..disclosure import contamination_disclosure, parameter_register
+from ..disclosure import (
+    DISCLOSURE_SCHEMA_CITATION,
+    DISCLOSURE_SCHEMA_URL,
+    contamination_disclosure,
+    parameter_register,
+)
 from ..gates import GateOutcome, GateReport
 from ..leaderboard import Leaderboard
 from ..results import CellStatus, ResultSet
@@ -196,23 +201,24 @@ def build_pdf(
         styles["body"]))
 
     head = [Paragraph(h, styles["cellhead"]) for h in
-            ["#", "Model", board.index_name, "95% CI"] +
+            ["#", "Model", board.index_name, "95% CI", "Gate"] +
             [board.metric_labels[r].replace(" · ", "<br/>") for r in board.metric_order]]
     body = []
     for row in board.rows:
         cells = [row.rank_text, row.label + ("  (tied)" if row.tied_with else ""),
                  row.index_text,
                  f"[{row.interval.low:.3f}, {row.interval.high:.3f}]"
-                 if row.interval.available else "—"]
+                 if row.interval.available else "—",
+                 row.gate_text]
         for ref in board.metric_order:
             c = row.metrics.get(ref)
             cells.append(c.format_value() if c else "—")
         body.append([Paragraph(str(c), styles["cell"]) for c in cells])
 
     n_metric_cols = len(board.metric_order)
-    widths = [8 * mm, 34 * mm, 17 * mm, 24 * mm]
+    widths = [8 * mm, 32 * mm, 16 * mm, 23 * mm, 15 * mm]
     widths += [(CONTENT_W - sum(widths)) / max(1, n_metric_cols)] * n_metric_cols
-    story.append(_table([head] + body, widths, align_right=list(range(2, 4 + n_metric_cols))))
+    story.append(_table([head] + body, widths, align_right=list(range(2, 5 + n_metric_cols))))
     story.append(Spacer(1, 6))
     for note in board.notes:
         story.append(Paragraph("• " + _strip_md(note), styles["small"]))
@@ -222,9 +228,9 @@ def build_pdf(
         story.append(PageBreak())
         story.append(Paragraph("The trade-off a single score hides", styles["h1"]))
         story.append(Paragraph(
-            "XSTest-safe and StrongREJECT measure opposite failure modes. A model can score "
-            "perfectly on either one by being uselessly cautious or recklessly helpful, so "
-            "reporting either alone is misleading. Both axes below are 'more is better'.",
+            "XSTest-safe and StrongREJECT measure opposite failure modes. A uselessly "
+            "cautious model scores perfectly on one; a recklessly helpful one scores "
+            "perfectly on the other. Both axes below are 'more is better'.",
             styles["body"]))
         story.append(_image(Path(path)))
 
@@ -313,9 +319,11 @@ def build_pdf(
     story.append(PageBreak())
     story.append(Paragraph("Contamination disclosure", styles["h1"]))
     story.append(Paragraph(
-        "Coded against the four-field disclosure schema, computed from what this run "
-        "recorded rather than asserted. A control that was not applied is coded 0; an "
-        "honest 0 beside a named mechanism is worth more than an unearned 2.",
+        DISCLOSURE_SCHEMA_CITATION.replace(
+            DISCLOSURE_SCHEMA_URL,
+            f"<link href='{DISCLOSURE_SCHEMA_URL}' color='blue'>{DISCLOSURE_SCHEMA_URL}</link>")
+        + " A control that was not applied is coded 0; an honest 0 beside a named mechanism "
+          "is worth more than an unearned 2.",
         styles["body"]))
     has_strata = any(m.per_stratum for c in results for m in c.metrics)
     disc = contamination_disclosure(results, config, per_stratum=has_strata)
@@ -396,8 +404,8 @@ def build_pdf(
     story.append(PageBreak())
     story.append(Paragraph("Gate detail", styles["h1"]))
     story.append(Paragraph(
-        "A gate that could not be evaluated is reported as an error and fails the build. "
-        "Treating an unevaluable gate as a pass would let a broken run ship silently.",
+        "An unevaluable gate is reported as an error and fails the build. Treating it as a "
+        "pass would let a broken run ship silently.",
         styles["body"]))
     head = [Paragraph(h, styles["cellhead"]) for h in
             ["Gate", "Model", "Metric", "Bound", "Observed", "Outcome", "Note"]]
@@ -415,8 +423,8 @@ def build_pdf(
     story.append(Paragraph("Provenance", styles["h1"]))
     story.append(Paragraph(
         "A score is a joint property of the model, the harness, the grader, the prompt "
-        "sample and the decoding parameters. Publishing the score alone is not reproducible, "
-        "so these columns travel with every number in this report.", styles["body"]))
+        "sample and the decoding parameters. The score alone is not reproducible, so these "
+        "columns travel with every number in this report.", styles["body"]))
     head = [Paragraph(h, styles["cellhead"]) for h in
             ["Task", "Model", "Metric", "Value", "95% CI", "Scored", "Unscored", "Ver.",
              "Status"]]

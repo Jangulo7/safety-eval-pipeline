@@ -115,6 +115,9 @@ safety claims.
 {% for w in warnings %}<div class="banner">{{ w }}</div>{% endfor %}
 
 <h2>Ranking</h2>
+<p class="sub"><b>Ordered by the number of release-gate thresholds each model violates, not
+by a composite score.</b> Counting violated requirements is non-compensatory: nothing a model
+does well reduces it. Models violating the same number share a rank.</p>
 <div class="card">
   <div class="legend">
     {% for m in models %}<span><span class="dot" style="background:{{ m.color }}"></span>{{ m.label }}</span>{% endfor %}
@@ -133,6 +136,7 @@ safety claims.
           {% if row.tied %}<span class="pill tied">tied</span>{% endif %}
           {% if row.partial %}<span class="pill blocked">partial</span>{% endif %}
         </td>
+        <td>{% if row.gate_failures %}{% for g in row.gate_failures %}<span class="pill fail">{{ g }}</span>{% endfor %}{% else %}<span class="pill pass">none</span>{% endif %}</td>
         <td class="num">{{ row.index_text }}{% if row.ci %}<span class="ci">{{ row.ci }}</span>{% endif %}</td>
         <td><div class="bar"><span style="width:{{ row.bar_pct }}%;background:{{ row.color }}"></span></div></td>
         {% for ref in metric_order %}
@@ -150,6 +154,25 @@ safety claims.
   </div>
   <ul class="notes">{% for n in notes %}<li>{{ n|safe }}</li>{% endfor %}</ul>
 </div>
+
+<details>
+  <summary>{{ index_name }} — diagnostic only, not a ranking</summary>
+  <p class="se-note">Weights:
+    {% for k, v in weights.items() %}<code>{{ k }}</code> {{ '%.0f'|format(v * 100) }}%{% if not loop.last %}, {% endif %}{% endfor %}.</p>
+  <p class="se-note">Shown because a normalised cross-benchmark summary is a useful smell
+  test; withheld from the ordering because it is not a sound basis for one:</p>
+  <ul class="notes">
+    <li><b>It is compensatory and safety is not.</b> A model flawless everywhere except
+      producing maximally specific harmful content on every forbidden prompt still scores
+      0.700 of 1.0 under these weights.</li>
+    <li><b>Two inputs are the same metric inverted, so they cancel.</b> Refusing everything,
+      refusing nothing, and coin-flipping every prompt all contribute 0.250 — and telling
+      those apart is why both XSTest subsets are run.</li>
+    <li><b>The inputs are not commensurable.</b> A proportion of prompts, a
+      severity-weighted mean on 0–5, and a rate conditioned on a per-model subset are
+      different kinds of quantity.</li>
+  </ul>
+</details>
 
 {% if charts %}
 <h2>Charts</h2>
@@ -230,9 +253,10 @@ for a benchmark built to locate over-refusal, is the finding rather than a detai
 {% endif %}
 
 <h2>Contamination disclosure</h2>
-<p class="sub">Coded against the four-field disclosure schema, computed from what this run
-recorded rather than asserted. A control that was not applied is coded <code>0</code>; an
-honest <code>0</code> beside a named mechanism is worth more than an unearned <code>2</code>.</p>
+<p class="sub">{{ disclosure.citation }}</p>
+<p class="sub">A control that was not applied is coded <code>0</code>; an honest
+<code>0</code> beside a named mechanism is worth more than an unearned <code>2</code>.
+Schema: <a href="{{ disclosure.schema_url }}">{{ disclosure.schema_url }}</a></p>
 <div class="card">
   <div class="scroll"><table>
     <thead><tr><th>Field</th><th class="num">Code</th><th>Basis</th></tr></thead>

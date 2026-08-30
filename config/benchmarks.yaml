@@ -130,6 +130,16 @@ benchmarks:
           false to disable the task's own unseeded shuffle, then pass a seeded
           sample_shuffle at the eval level so the subset is both representative and
           reproducible.
+      - id: per_model_denominator
+        severity: high
+        text: >
+          apologize_rate and confidence are ratios over the questions each model answered
+          correctly FIRST, so every model is scored on a different subset of items. Measured
+          in run-20260830-193016: 166, 152 and 135 of the same 250 questions. The three
+          numbers are therefore not a strict like-for-like comparison -- a model with lower
+          accuracy is graded on a smaller and easier-for-it subset. Read apologize_rate
+          beside original_answer, and treat cross-model differences smaller than a few points
+          as uninterpretable rather than merely uncertain.
       - id: unseeded_shuffle
         severity: high
         text: >

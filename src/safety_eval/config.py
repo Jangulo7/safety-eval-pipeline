@@ -89,11 +89,24 @@ class GateSpec:
     metric: str
     min: float | None = None
     max: float | None = None
+    min_per_stratum: float | None = None
+    """No single dataset category may fall below this. Distinct from ``min``, which is a
+    bound on the aggregate.
+
+    An aggregate threshold over a stratified dataset can be cleared while one whole category
+    fails badly: in run-20260830-193016 two models passed the under-refusal gate at 82-83%
+    while refusing only 28-32% of the discrimination contrast prompts. A gate that a model
+    can pass with a category that bad is measuring the wrong thing."""
+
+    max_per_stratum: float | None = None
+    """No single dataset category may exceed this."""
+
     rationale: str = ""
 
     def __post_init__(self) -> None:
-        if self.min is None and self.max is None:
-            raise ConfigError(f"gate {self.id!r} has neither a min nor a max bound")
+        if all(b is None for b in (self.min, self.max, self.min_per_stratum,
+                                   self.max_per_stratum)):
+            raise ConfigError(f"gate {self.id!r} has no bound of any kind")
         if self.min is not None and self.max is not None and self.min > self.max:
             raise ConfigError(f"gate {self.id!r} has min {self.min} > max {self.max}")
 
@@ -292,7 +305,9 @@ class RunConfig:
             except (ConfigError, CatalogError) as exc:
                 raise ConfigError(f"gate {g.id!r}: {exc}") from None
             lo, hi = metric.range
-            for bound_name, bound in (("min", g.min), ("max", g.max)):
+            for bound_name, bound in (("min", g.min), ("max", g.max),
+                                      ("min_per_stratum", g.min_per_stratum),
+                                      ("max_per_stratum", g.max_per_stratum)):
                 if bound is None:
                     continue
                 if not lo <= bound <= hi:

@@ -152,17 +152,15 @@ def build(results: ResultSet, config: RunConfig) -> Conditions:
 
 
 PREAMBLE = (
-    "Every model was measured under the parameters below. They are read back from the "
-    "recorded cells rather than from the configuration, so a mid-run edit or a resumed run "
-    "cannot pass unnoticed."
+    "Every model ran under the parameters below. They are read back from the recorded "
+    "cells, not from the configuration, so a mid-run edit cannot pass unnoticed."
 )
 
 COVERAGE_NOTE = (
-    "**Stratum coverage** is the share of the dataset's own categories the run actually "
-    "evaluated. It matters because all three datasets ship grouped by category: an "
-    "unshuffled `limit=50` on XSTest-safe evaluates 2 of its 10 prompt types and nothing "
-    "else, and on StrongREJECT 1 of 6 harm categories. The dataset-order seed shuffles "
-    "before the limit is applied, which is what makes a capped run representative as well "
-    "as reproducible. It is a different parameter from the generation seed, which has no "
-    "effect on which samples are drawn."
+    "**Stratum coverage** is the share of a dataset's own categories the run evaluated. All "
+    "three datasets ship grouped by category, so an unshuffled cap reaches only the first "
+    "few: `limit=50` covers 2 of XSTest-safe's 10 prompt types and 1 of StrongREJECT's 6 "
+    "harm categories. The dataset-order seed shuffles before the limit applies, which makes "
+    "a capped run representative as well as reproducible. The generation seed does not "
+    "affect which samples are drawn."
 )

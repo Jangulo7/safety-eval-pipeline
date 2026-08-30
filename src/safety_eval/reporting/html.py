@@ -21,7 +21,12 @@ from typing import Any
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from ..config import RunConfig
-from ..disclosure import contamination_disclosure, parameter_register
+from ..disclosure import (
+    DISCLOSURE_SCHEMA_CITATION,
+    DISCLOSURE_SCHEMA_URL,
+    contamination_disclosure,
+    parameter_register,
+)
 from ..gates import GateOutcome, GateReport
 from ..leaderboard import Leaderboard
 from ..results import CellStatus, ResultSet
@@ -98,6 +103,8 @@ def render_leaderboard_html(
                    if row.interval.available else ""),
             "bar_pct": 0 if math.isnan(row.index) else round(row.index * 100, 1),
             "tied": bool(row.tied_with),
+            "gate_text": row.gate_text,
+            "gate_failures": row.gate_failures,
             "partial": row.partial,
             "cells": cells,
         })
@@ -186,6 +193,8 @@ def render_leaderboard_html(
         "rows": [{"name": n, "code": c, "why": w} for n, c, w in disc.rows()],
         "f2_notes": disc.f2_notes,
         "headline": disc.headline,
+        "citation": DISCLOSURE_SCHEMA_CITATION,
+        "schema_url": DISCLOSURE_SCHEMA_URL,
     }
     register: list[dict[str, Any]] = []
     section = None
@@ -246,6 +255,7 @@ def render_leaderboard_html(
         rows=rows,
         metric_order=board.metric_order,
         metric_labels=board.metric_labels,
+        weights=board.weights,
         notes=board.notes,
         warnings=warnings,
         charts=charts,

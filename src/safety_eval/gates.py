@@ -17,11 +17,12 @@ a gate that can never fire is worse than no gate because it looks like coverage.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 
 from .config import GateSpec, RunConfig
 from .results import CellStatus, ResultSet
+from .stats import wilson_from_rate
 
 
 class GateOutcome(str, Enum):
@@ -47,16 +48,36 @@ class GateResult:
     bound_max: float | None
     unit: str | None
     rationale: str
+    bound_min_stratum: float | None = None
+    bound_max_stratum: float | None = None
+    worst_stratum: str | None = None
+    worst_stratum_value: float = math.nan
+    failing_strata: list[tuple[str, float, int]] = field(default_factory=list)
     detail: str = ""
 
     @property
     def bound_text(self) -> str:
         suffix = "%" if self.unit == "percent" else ""
+        parts = []
         if self.bound_min is not None and self.bound_max is not None:
-            return f"{self.bound_min:g}{suffix} - {self.bound_max:g}{suffix}"
-        if self.bound_max is not None:
-            return f"<= {self.bound_max:g}{suffix}"
-        return f">= {self.bound_min:g}{suffix}"
+            parts.append(f"{self.bound_min:g}{suffix} - {self.bound_max:g}{suffix}")
+        elif self.bound_max is not None:
+            parts.append(f"<= {self.bound_max:g}{suffix}")
+        elif self.bound_min is not None:
+            parts.append(f">= {self.bound_min:g}{suffix}")
+        if self.bound_min_stratum is not None:
+            parts.append(f"每 stratum >= {self.bound_min_stratum:g}{suffix}")
+        if self.bound_max_stratum is not None:
+            parts.append(f"每 stratum <= {self.bound_max_stratum:g}{suffix}")
+        return "; ".join(parts).replace("每", "each")
+
+    @property
+    def stratum_text(self) -> str:
+        """The worst category, which is what a per-stratum breach is actually about."""
+        if self.worst_stratum is None or math.isnan(self.worst_stratum_value):
+            return ""
+        suffix = "%" if self.unit == "percent" else ""
+        return f"{self.worst_stratum} {self.worst_stratum_value:.4g}{suffix}"
 
     @property
     def observed_text(self) -> str:
@@ -132,6 +153,8 @@ def _evaluate_one(
         model_label=results.label_for(model_id),
         bound_min=gate.min,
         bound_max=gate.max,
+        bound_min_stratum=gate.min_per_stratum,
+        bound_max_stratum=gate.max_per_stratum,
         unit=metric_spec.unit,
         rationale=gate.rationale,
     )
@@ -157,13 +180,41 @@ def _evaluate_one(
 
     breaches: list[str] = []
     if gate.max is not None and metric.value > gate.max:
-        breaches.append(f"{metric.value:.4g} > max {gate.max:g}")
+        breaches.append(f"aggregate {metric.value:.4g} > max {gate.max:g}")
     if gate.min is not None and metric.value < gate.min:
-        breaches.append(f"{metric.value:.4g} < min {gate.min:g}")
+        breaches.append(f"aggregate {metric.value:.4g} < min {gate.min:g}")
+
+    # Per-stratum bounds. An aggregate can be cleared while one category fails badly, and a
+    # gate a model passes with a category that bad is measuring the wrong thing.
+    failing, worst, worst_value = _stratum_breaches(gate, metric)
+    if failing:
+        described = []
+        for s, v, n in failing[:4]:
+            decisive = stratum_is_decisive(gate, metric, v, n)
+            mark = {True: "", False: ", NOT decisive at this n",
+                    None: ", no interval available for this metric"}[decisive]
+            described.append(f"{s} {v:.4g} (n={n}{mark})")
+        more = f" and {len(failing) - 4} more" if len(failing) > 4 else ""
+        n_soft = sum(1 for s, v, n in failing
+                     if stratum_is_decisive(gate, metric, v, n) is False)
+        n_unknown = sum(1 for s, v, n in failing
+                        if stratum_is_decisive(gate, metric, v, n) is None)
+        if n_soft:
+            qualifier = f" — {n_soft} of them not decisive at this sample size"
+        elif n_unknown == len(failing):
+            qualifier = (" — decisiveness not assessed: this metric is a bounded mean, not "
+                         "a proportion, so no per-stratum interval is computed for it")
+        else:
+            qualifier = " — every assessable one decisive at 95%"
+        breaches.append(
+            f"{len(failing)} of {len(metric.per_stratum)} strata breach the per-stratum "
+            f"bound: {', '.join(described)}{more}{qualifier}"
+        )
 
     if breaches:
         return GateResult(**base, outcome=GateOutcome.FAIL, observed=metric.value,
-                          detail="; ".join(breaches))
+                          worst_stratum=worst, worst_stratum_value=worst_value,
+                          failing_strata=failing, detail="; ".join(breaches))
 
     # A pass whose interval straddles the bound is not a comfortable pass, and the report
     # says so rather than presenting a coin-flip as compliance.
@@ -175,7 +226,68 @@ def _evaluate_one(
     if straddles:
         detail = ("passes on the point estimate, but the 95% interval "
                   f"[{metric.ci_low:.3g}, {metric.ci_high:.3g}] crosses the bound")
-    return GateResult(**base, outcome=GateOutcome.PASS, observed=metric.value, detail=detail)
+    return GateResult(**base, outcome=GateOutcome.PASS, observed=metric.value,
+                      worst_stratum=worst, worst_stratum_value=worst_value, detail=detail)
+
+
+def _stratum_breaches(
+    gate: GateSpec, metric
+) -> tuple[list[tuple[str, float, int]], str | None, float]:
+    """Categories that breach a per-stratum bound, plus the worst one either way.
+
+    Strata are small — 25 samples per XSTest prompt type — so a breach is reported with
+    whether its 95% interval actually clears the bound. A point estimate 2 points past a
+    threshold at n=25 is not evidence of anything, and a gate that treats it as evidence is
+    manufacturing findings out of sampling noise.
+    """
+    per_stratum = getattr(metric, "per_stratum", None) or {}
+    if not per_stratum:
+        return [], None, math.nan
+
+    lower_is_worse = gate.min_per_stratum is not None or gate.min is not None
+    worst = (min if lower_is_worse else max)(per_stratum.items(),
+                                             key=lambda kv: kv[1][0])
+    failing = []
+    for stratum, (value, n) in sorted(per_stratum.items(), key=lambda kv: kv[1][0],
+                                      reverse=not lower_is_worse):
+        if (gate.min_per_stratum is not None and value < gate.min_per_stratum) or (gate.max_per_stratum is not None and value > gate.max_per_stratum):
+            failing.append((stratum, value, int(n)))
+    return failing, worst[0], worst[1][0]
+
+
+# Metrics that are genuinely proportions, and so admit a Wilson interval per stratum.
+# Anything else — a bounded mean, a ratio over a per-model subset — does not.
+_RATE_METRICS = {
+    "model_graded_qa/refusal_rate",
+    "strong_reject_scorer/jailbreak_rate",
+}
+
+
+def stratum_is_decisive(gate: GateSpec, metric, value: float, n: int) -> bool | None:
+    """Whether a stratum's whole 95% interval clears the bound it breached.
+
+    Strata are small -- 25 samples per XSTest prompt type -- so a point estimate two points
+    past a threshold is not evidence of anything. A gate that treats it as evidence is
+    manufacturing findings out of sampling noise. Returns ``None`` when no interval can be
+    formed.
+    """
+    if n <= 0 or metric.range_high <= metric.range_low:
+        return None
+    # Wilson is an interval for a PROPORTION. `strong_reject_metric` is a bounded mean of
+    # per-sample severity scores, not a proportion, so Wilson does not apply to it and
+    # pretending otherwise would put a fabricated interval behind a gate decision. The
+    # aggregate for such a metric is bootstrapped; the per-stratum values are not, so no
+    # decisiveness claim is made for them at all.
+    if metric.address not in _RATE_METRICS:
+        return None
+    interval = wilson_from_rate(value, n, scale=metric.range_high)
+    if not interval.available:
+        return None
+    if gate.min_per_stratum is not None:
+        return interval.high < gate.min_per_stratum
+    if gate.max_per_stratum is not None:
+        return interval.low > gate.max_per_stratum
+    return None
 
 
 def render_markdown(report: GateReport, results: ResultSet, config: RunConfig) -> str:
@@ -191,15 +303,15 @@ def render_markdown(report: GateReport, results: ResultSet, config: RunConfig) -
         "> Thresholds are illustrative defaults chosen to demonstrate the gating mechanism.",
         "> They are not safety claims and must not be cited as such.",
         "",
-        "| gate | model | metric | bound | observed | outcome | note |",
-        "|---|---|---|---|---|---|---|",
+        "| gate | model | metric | bound | observed | worst stratum | outcome | note |",
+        "|---|---|---|---|---|---|---|---|",
     ]
     for r in report.results:
         mark = {GateOutcome.PASS: "pass", GateOutcome.FAIL: "**FAIL**",
                 GateOutcome.ERROR: "_error_"}[r.outcome]
         lines.append(
             f"| `{r.gate_id}` | {r.model_label} | {r.metric_label} | {r.bound_text} | "
-            f"{r.observed_text} | {mark} | {r.detail or ''} |"
+            f"{r.observed_text} | {r.stratum_text or '—'} | {mark} | {r.detail or ''} |"
         )
 
     if config.dropped_gates:

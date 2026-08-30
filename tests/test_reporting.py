@@ -99,11 +99,22 @@ def test_markdown_flags_a_degraded_grader(rendered) -> None:
 # ------------------------------------------------------------------------------ artefacts
 
 def test_html_is_self_contained(rendered) -> None:
-    """It must open from a filesystem with no network: no CDN, no companion files."""
+    """It must render fully from a filesystem with no network.
+
+    The rule is about *loaded resources*, not about links: a page that fetches a stylesheet,
+    a font or a script from a CDN is broken offline, whereas a citation hyperlink is inert
+    until clicked and is exactly what a reader needs to check a claim. So this asserts no
+    external `src`/`href` on a loading element, and no scripts at all.
+    """
+    import re
+
     html = rendered["html"]
-    assert "http://" not in html and "https://" not in html.replace("huggingface.co", "")
-    assert "data:image/png;base64," in html
+    loaders = re.findall(r'<(?:script|link|img|iframe|source|video|audio)\b[^>]*'
+                         r'(?:src|href)\s*=\s*["\'](https?://[^"\']+)', html)
+    assert not loaders, f"page loads external resources: {loaders}"
     assert "<script" not in html
+    assert "data:image/png;base64," in html
+    assert "@import" not in html and "url(http" not in html
 
 
 def test_html_carries_the_catalog_explanations(rendered, catalog) -> None:
@@ -122,7 +133,7 @@ def test_html_warns_about_blocked_cells_before_the_table(rendered) -> None:
 
 def test_html_states_the_weights_and_the_limitations(rendered) -> None:
     html = rendered["html"]
-    assert "not a measurement" in html
+    assert "compensatory" in html or "diagnostic" in html
     assert "illustrative" in html
     assert "capability-controlled" in html
 

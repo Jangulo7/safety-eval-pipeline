@@ -124,7 +124,7 @@ def test_gate_with_no_bound_is_rejected(catalog: Catalog, tmp_path) -> None:
     data = minimal()
     data["gates"] = [{"id": "g", "task": "sr",
                       "metric": "strong_reject_scorer/jailbreak_rate"}]
-    with pytest.raises(ConfigError, match="neither a min nor a max"):
+    with pytest.raises(ConfigError, match="no bound of any kind"):
         RunConfig.load(write(tmp_path, data), catalog)
 
 

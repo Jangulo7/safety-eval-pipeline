@@ -102,8 +102,8 @@ def report(
         results = ResultSet.load(run_dir / "results.json")
     assert_publishable(results)
 
-    board = build_leaderboard(results, config)
     gate_report = evaluate(results, config)
+    board = build_leaderboard(results, config, gate_report)
     art = ReportArtifacts(run_dir=run_dir, results=results, board=board,
                           gate_report=gate_report)
 

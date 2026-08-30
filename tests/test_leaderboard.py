@@ -8,26 +8,59 @@ it cannot support.
 
 from __future__ import annotations
 
+import itertools
 import math
 
 from safety_eval.leaderboard import build, render_markdown
 from safety_eval.stats import Interval
 
 
-def test_ranks_by_the_composite_index(results, config) -> None:
+def test_ranks_by_violated_requirements_not_by_a_score(results, config) -> None:
+    """Non-compensatory by construction: nothing a model does well reduces the count.
+
+    A weighted mean lets excellence on one axis pay for catastrophe on another, which for
+    safety is exactly backwards — and two of the index's inputs are the same metric inverted,
+    so they cancel. Counting violated thresholds has neither problem.
+    """
+    from safety_eval.gates import evaluate
+
+    board = build(results, config, evaluate(results, config))
+    counts = [len(r.gate_failures) for r in board.rows]
+    assert counts == sorted(counts), "rows must be ordered by violations ascending"
+    assert [r.rank for r in board.rows] == sorted(r.rank for r in board.rows)
+
+
+def test_the_index_does_not_determine_the_order(results, config) -> None:
+    """A model with a better index but more violations must rank lower."""
+    from safety_eval.gates import evaluate
+
+    board = build(results, config, evaluate(results, config))
+    by_rank = [r for r in board.rows if r.rank]
+    for better, worse in itertools.pairwise(by_rank):
+        assert len(better.gate_failures) <= len(worse.gate_failures)
+
+
+def test_equal_violation_counts_share_a_rank_and_are_not_split_by_the_index(
+    results, config
+) -> None:
+    """Splitting a tie on the index would smuggle the compensatory ordering back in."""
+    from safety_eval.leaderboard import _rank
+
     board = build(results, config)
-    indices = [r.index for r in board.rows if not math.isnan(r.index)]
-    assert indices == sorted(indices, reverse=True)
+    for i, row in enumerate(board.rows):
+        row.gate_failures = ["g"]                      # everyone violates exactly one
+        row.index = 0.9 - 0.2 * i                      # and their indices differ widely
+    _rank(board.rows)
+    assert {r.rank for r in board.rows} == {1}
+    assert all(r.tied_with for r in board.rows)
 
 
 def test_normalisation_respects_direction_and_range(results, config) -> None:
-    """The fixture's safest model is the one that refuses least on safe prompts, refuses most
-    on unsafe ones, and has the lowest StrongREJECT score — despite those being three
-    different scales pointing in two different directions."""
+    """The index is still computed as a diagnostic, over three scales and two directions."""
     board = build(results, config)
-    top = board.top()
-    assert top.label == "Qwen2.5 7B Instruct"
-    assert 0.0 <= top.index <= 1.0
+    best = max(board.rows, key=lambda r: r.index)
+    assert best.label == "Qwen2.5 7B Instruct"
+    assert all(0.0 <= r.index <= 1.0 for r in board.rows if not math.isnan(r.index))
 
 
 def test_a_model_that_refuses_everything_scores_worse(results, config) -> None:
@@ -53,7 +86,8 @@ def test_a_model_that_refuses_everything_scores_worse(results, config) -> None:
     after = next(r for r in build(results, config).rows
                  if r.model_id == over_cautious).index
     assert after < before
-    assert build(results, config).top().model_id != over_cautious
+    best = max(build(results, config).rows, key=lambda r: r.index)
+    assert best.model_id != over_cautious
 
 
 def test_overlapping_intervals_share_a_rank(results, config) -> None:
@@ -62,30 +96,30 @@ def test_overlapping_intervals_share_a_rank(results, config) -> None:
         row.interval = Interval(0.4, 0.9, "test")
     from safety_eval.leaderboard import _rank
 
-    _rank(board.rows, tie_on_ci=True)
+    for row in board.rows:
+        row.gate_failures = []
+    _rank(board.rows)
     assert all(r.rank == 1 for r in board.rows)
     assert all(r.tied_with for r in board.rows)
     assert all(r.rank_text.startswith("=") for r in board.rows)
 
 
-def test_separated_intervals_are_ranked(results, config) -> None:
+def test_different_violation_counts_are_ranked(results, config) -> None:
     board = build(results, config)
     for i, row in enumerate(board.rows):
-        row.index = 0.9 - 0.3 * i
-        row.interval = Interval(row.index - 0.02, row.index + 0.02, "test")
+        row.gate_failures = ["g"] * i
     from safety_eval.leaderboard import _rank
 
-    _rank(board.rows, tie_on_ci=True)
+    _rank(board.rows)
     assert [r.rank for r in board.rows] == [1, 2, 3]
     assert not any(r.tied_with for r in board.rows)
 
 
-def test_tie_detection_can_be_switched_off(results, config) -> None:
+def test_without_a_gate_report_nothing_is_ranked(results, config) -> None:
+    """No gates evaluated means no basis for an order, and none is invented."""
     board = build(results, config)
-    from safety_eval.leaderboard import _rank
-
-    _rank(board.rows, tie_on_ci=False)
-    assert [r.rank for r in board.rows] == list(range(1, len(board.rows) + 1))
+    assert all(r.rank == 0 for r in board.rows)
+    assert all(r.rank_text == "—" for r in board.rows)
 
 
 def test_a_model_with_no_usable_metric_gets_no_index(messy_results, config) -> None:
@@ -127,7 +161,16 @@ def test_notes_always_state_the_evidence_and_that_weights_are_a_choice(
     joined = " ".join(board.notes)
     assert "Samples per model" in joined
     assert "n = " in joined
-    assert "not a measurement" in joined
+    assert "non-compensatory" in joined or "violated thresholds" in joined
+
+
+def test_the_index_is_labelled_a_diagnostic_wherever_it_appears(results, config) -> None:
+    """It is shown because it is a useful smell test, and withheld from the ordering
+    because it is not a sound basis for one. Both facts have to travel with it."""
+    text = render_markdown(build(results, config))
+    assert "diagnostic" in text.lower()
+    assert "compensatory" in text
+    assert "not commensurable" in text or "commensurable" in text
 
 
 def test_mixed_task_versions_are_flagged(results, config) -> None:

@@ -274,9 +274,8 @@ def leaderboard_chart(board: Leaderboard, results: ResultSet, path: Path) -> Pat
     ax.set_xlim(0, 1.22)
     ax.set_xlabel("Composite index (1 = best)", color=theme.INK_SECONDARY, fontsize=9)
 
-    caption = ("Whiskers are 95% intervals. Models whose intervals overlap share a rank and "
-               "are marked 'tied' — at this sample size an ordering between them would be a "
-               "false claim.")
+    caption = ("Whiskers are 95% intervals. This index is a diagnostic, not the ranking: "
+               "the leaderboard orders models by how many gate thresholds they violate.")
     _frame(
         fig,
         title=f"{board.index_name} — higher is better",
