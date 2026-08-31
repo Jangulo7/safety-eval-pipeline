@@ -143,15 +143,32 @@ def test_each_benchmark_declares_its_own_protocol(config, catalog) -> None:
 
 
 def test_protocol_provenance_is_recorded(catalog) -> None:
-    """A value the pipeline chose must be distinguishable from the benchmark's own."""
+    """A value the pipeline chose must be distinguishable from the benchmark's own.
+
+    XSTest takes every parameter from its task definition. Sycophancy sets no GenerateConfig
+    at all, so all of ours are choices. StrongREJECT takes temperature and max_tokens from
+    its task but has `top_p` pinned here — the task leaves it unset, and it is the only
+    benchmark that samples, so an unrecorded nucleus setting would be the one uncontrolled
+    parameter in the run.
+    """
     assert not catalog["xstest"].deviates_from_protocol
-    assert not catalog["strong_reject"].deviates_from_protocol
-    assert catalog["sycophancy"].deviates_from_protocol, (
-        "sycophancy's task sets no GenerateConfig, so our values are pipeline choices"
-    )
-    for _, _, source, note in catalog["sycophancy"].protocol_rows():
-        if "pipeline choice" in source:
-            assert note, "a pipeline choice must carry its reasoning into the report"
+    for key in ("sycophancy", "strong_reject"):
+        assert catalog[key].deviates_from_protocol, f"{key} has pipeline-chosen parameters"
+        for _, _, source, note in catalog[key].protocol_rows():
+            if "pipeline choice" in source:
+                assert note, f"{key}: a pipeline choice must carry its reasoning"
+
+
+def test_the_only_sampling_benchmark_pins_its_nucleus_setting(catalog) -> None:
+    """Leaving top_p to the serving default would make the one non-greedy score in the run
+    depend on a value nobody recorded."""
+    sr = catalog["strong_reject"]
+    assert sr.protocol["temperature"]["value"] > 0
+    assert "top_p" in sr.protocol
+    for key in ("xstest", "sycophancy"):
+        assert catalog[key].protocol["temperature"]["value"] == 0, (
+            "greedy decoding ignores nucleus sampling, so pinning it there would be noise"
+        )
 
 
 def test_sampling_above_zero_without_a_seed_blocks(catalog, tmp_path) -> None:

@@ -13,7 +13,14 @@
     "inspect_evals_version": "0.18.0",
     "pipeline_version": "2.0.0",
     "command": null,
-    "notes": ""
+    "notes": "",
+    "host": {
+      "gpu_model": "NVIDIA GeForce RTX 5090",
+      "driver_version": "596.36",
+      "gpu_count": "1",
+      "cuda_version": "12.8",
+      "captured": "after the run, on the same host \u2014 the capture code did not exist during it"
+    }
   },
   "cells": [
     {
@@ -168,7 +175,22 @@
       "log_path": "logs/sycophancy/vllm-Qwen-Qwen2.5-7B-Instruct/2026-08-30T19-31-09-00-00_sycophancy_77kdyPKsxRZsGkYFmcCjE3.eval",
       "log_published": true,
       "timestamp_utc": "2026-08-30T19:32:30.603078+00:00",
-      "attempts": 1
+      "attempts": 1,
+      "run_commit": "7040caa",
+      "run_commit_dirty": true,
+      "system_prompt": null,
+      "eval_config": {
+        "limit": 250,
+        "sample_shuffle": 42,
+        "epochs": 1,
+        "fail_on_error": false
+      },
+      "serving": {
+        "checkpoint_dtype": "bfloat16",
+        "param_count_billions": "7.62",
+        "bits_per_weight": "16",
+        "checkpoint_bytes": "15231233024"
+      }
     },
     {
       "run_id": "run-20260830-193016",
@@ -291,7 +313,21 @@
       "log_path": "logs/xstest_safe/vllm-Qwen-Qwen2.5-7B-Instruct/2026-08-30T19-32-32-00-00_xstest_7Z7Vz9VpZeY3L64DfqeNSj.eval",
       "log_published": true,
       "timestamp_utc": "2026-08-30T19:34:03.127094+00:00",
-      "attempts": 1
+      "attempts": 1,
+      "run_commit": "7040caa",
+      "run_commit_dirty": true,
+      "system_prompt": "You are a helpful assistant.",
+      "eval_config": {
+        "sample_shuffle": 42,
+        "epochs": 1,
+        "fail_on_error": false
+      },
+      "serving": {
+        "checkpoint_dtype": "bfloat16",
+        "param_count_billions": "7.62",
+        "bits_per_weight": "16",
+        "checkpoint_bytes": "15231233024"
+      }
     },
     {
       "run_id": "run-20260830-193016",
@@ -404,7 +440,21 @@
       "log_path": "logs/xstest_unsafe/vllm-Qwen-Qwen2.5-7B-Instruct/2026-08-30T19-34-04-00-00_xstest_d9nD28bkS4ZC5H7ejf2eHH.eval",
       "log_published": true,
       "timestamp_utc": "2026-08-30T19:35:22.069150+00:00",
-      "attempts": 1
+      "attempts": 1,
+      "run_commit": "7040caa",
+      "run_commit_dirty": true,
+      "system_prompt": "You are a helpful assistant.",
+      "eval_config": {
+        "sample_shuffle": 42,
+        "epochs": 1,
+        "fail_on_error": false
+      },
+      "serving": {
+        "checkpoint_dtype": "bfloat16",
+        "param_count_billions": "7.62",
+        "bits_per_weight": "16",
+        "checkpoint_bytes": "15231233024"
+      }
     },
     {
       "run_id": "run-20260830-193016",
@@ -523,7 +573,21 @@
       "log_path": null,
       "log_published": false,
       "timestamp_utc": "2026-08-30T19:37:34.093079+00:00",
-      "attempts": 1
+      "attempts": 1,
+      "run_commit": "7040caa",
+      "run_commit_dirty": true,
+      "system_prompt": null,
+      "eval_config": {
+        "sample_shuffle": 42,
+        "epochs": 1,
+        "fail_on_error": false
+      },
+      "serving": {
+        "checkpoint_dtype": "bfloat16",
+        "param_count_billions": "7.62",
+        "bits_per_weight": "16",
+        "checkpoint_bytes": "15231233024"
+      }
     },
     {
       "run_id": "run-20260830-193016",
@@ -677,7 +741,22 @@
       "log_path": "logs/sycophancy/vllm-meta-llama-Llama-3.1-8B-Instruct/2026-08-30T19-38-31-00-00_sycophancy_haoyU56U6VVNuGDWYgNkpJ.eval",
       "log_published": true,
       "timestamp_utc": "2026-08-30T19:40:24.972132+00:00",
-      "attempts": 1
+      "attempts": 1,
+      "run_commit": "7040caa",
+      "run_commit_dirty": true,
+      "system_prompt": null,
+      "eval_config": {
+        "limit": 250,
+        "sample_shuffle": 42,
+        "epochs": 1,
+        "fail_on_error": false
+      },
+      "serving": {
+        "checkpoint_dtype": "bfloat16",
+        "param_count_billions": "8.03",
+        "bits_per_weight": "16",
+        "checkpoint_bytes": "16060522496"
+      }
     },
     {
       "run_id": "run-20260830-193016",
@@ -800,7 +879,21 @@
       "log_path": "logs/xstest_safe/vllm-meta-llama-Llama-3.1-8B-Instruct/2026-08-30T19-40-26-00-00_xstest_2suMWYiLz8QVvKjGFcSEKv.eval",
       "log_published": true,
       "timestamp_utc": "2026-08-30T19:42:03.558693+00:00",
-      "attempts": 1
+      "attempts": 1,
+      "run_commit": "7040caa",
+      "run_commit_dirty": true,
+      "system_prompt": "You are a helpful assistant.",
+      "eval_config": {
+        "sample_shuffle": 42,
+        "epochs": 1,
+        "fail_on_error": false
+      },
+      "serving": {
+        "checkpoint_dtype": "bfloat16",
+        "param_count_billions": "8.03",
+        "bits_per_weight": "16",
+        "checkpoint_bytes": "16060522496"
+      }
     },
     {
       "run_id": "run-20260830-193016",
@@ -913,7 +1006,21 @@
       "log_path": "logs/xstest_unsafe/vllm-meta-llama-Llama-3.1-8B-Instruct/2026-08-30T19-42-04-00-00_xstest_d9kZxKfcnwFRA5UbMxPBWw.eval",
       "log_published": true,
       "timestamp_utc": "2026-08-30T19:42:57.640882+00:00",
-      "attempts": 1
+      "attempts": 1,
+      "run_commit": "7040caa",
+      "run_commit_dirty": true,
+      "system_prompt": "You are a helpful assistant.",
+      "eval_config": {
+        "sample_shuffle": 42,
+        "epochs": 1,
+        "fail_on_error": false
+      },
+      "serving": {
+        "checkpoint_dtype": "bfloat16",
+        "param_count_billions": "8.03",
+        "bits_per_weight": "16",
+        "checkpoint_bytes": "16060522496"
+      }
     },
     {
       "run_id": "run-20260830-193016",
@@ -1032,7 +1139,21 @@
       "log_path": null,
       "log_published": false,
       "timestamp_utc": "2026-08-30T19:44:07.396108+00:00",
-      "attempts": 1
+      "attempts": 1,
+      "run_commit": "7040caa",
+      "run_commit_dirty": true,
+      "system_prompt": null,
+      "eval_config": {
+        "sample_shuffle": 42,
+        "epochs": 1,
+        "fail_on_error": false
+      },
+      "serving": {
+        "checkpoint_dtype": "bfloat16",
+        "param_count_billions": "8.03",
+        "bits_per_weight": "16",
+        "checkpoint_bytes": "16060522496"
+      }
     },
     {
       "run_id": "run-20260830-193016",
@@ -1186,7 +1307,22 @@
       "log_path": "logs/sycophancy/vllm-mistralai-Ministral-8B-Instruct-2410/2026-08-30T19-45-04-00-00_sycophancy_JU7cF2ze6yJ7qzHvXKzjtf.eval",
       "log_published": true,
       "timestamp_utc": "2026-08-30T19:46:47.732085+00:00",
-      "attempts": 1
+      "attempts": 1,
+      "run_commit": "7040caa",
+      "run_commit_dirty": true,
+      "system_prompt": null,
+      "eval_config": {
+        "limit": 250,
+        "sample_shuffle": 42,
+        "epochs": 1,
+        "fail_on_error": false
+      },
+      "serving": {
+        "checkpoint_dtype": "bfloat16",
+        "param_count_billions": "8.02",
+        "bits_per_weight": "16",
+        "checkpoint_bytes": "16039616512"
+      }
     },
     {
       "run_id": "run-20260830-193016",
@@ -1309,7 +1445,21 @@
       "log_path": "logs/xstest_safe/vllm-mistralai-Ministral-8B-Instruct-2410/2026-08-30T19-46-48-00-00_xstest_YvCPwGydCiAnFtooB7Eyf2.eval",
       "log_published": true,
       "timestamp_utc": "2026-08-30T19:48:23.844061+00:00",
-      "attempts": 1
+      "attempts": 1,
+      "run_commit": "7040caa",
+      "run_commit_dirty": true,
+      "system_prompt": "You are a helpful assistant.",
+      "eval_config": {
+        "sample_shuffle": 42,
+        "epochs": 1,
+        "fail_on_error": false
+      },
+      "serving": {
+        "checkpoint_dtype": "bfloat16",
+        "param_count_billions": "8.02",
+        "bits_per_weight": "16",
+        "checkpoint_bytes": "16039616512"
+      }
     },
     {
       "run_id": "run-20260830-193016",
@@ -1422,7 +1572,21 @@
       "log_path": "logs/xstest_unsafe/vllm-mistralai-Ministral-8B-Instruct-2410/2026-08-30T19-48-24-00-00_xstest_kgQCCFM77k3DqirsTBvYNp.eval",
       "log_published": true,
       "timestamp_utc": "2026-08-30T19:49:47.364575+00:00",
-      "attempts": 1
+      "attempts": 1,
+      "run_commit": "7040caa",
+      "run_commit_dirty": true,
+      "system_prompt": "You are a helpful assistant.",
+      "eval_config": {
+        "sample_shuffle": 42,
+        "epochs": 1,
+        "fail_on_error": false
+      },
+      "serving": {
+        "checkpoint_dtype": "bfloat16",
+        "param_count_billions": "8.02",
+        "bits_per_weight": "16",
+        "checkpoint_bytes": "16039616512"
+      }
     },
     {
       "run_id": "run-20260830-193016",
@@ -1541,7 +1705,21 @@
       "log_path": null,
       "log_published": false,
       "timestamp_utc": "2026-08-30T19:52:31.470268+00:00",
-      "attempts": 1
+      "attempts": 1,
+      "run_commit": "7040caa",
+      "run_commit_dirty": true,
+      "system_prompt": null,
+      "eval_config": {
+        "sample_shuffle": 42,
+        "epochs": 1,
+        "fail_on_error": false
+      },
+      "serving": {
+        "checkpoint_dtype": "bfloat16",
+        "param_count_billions": "8.02",
+        "bits_per_weight": "16",
+        "checkpoint_bytes": "16039616512"
+      }
     }
   ]
 }

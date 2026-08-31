@@ -185,6 +185,23 @@ class RegisterRow:
     status: str
     """``recorded`` · ``not applicable`` · ``undisclosed`` · ``missing``"""
 
+    provenance: str = "requested"
+    """How the value was obtained, which decides how much it is worth.
+
+    ``measured``     read back from the run's own artefacts: the eval log, the package
+                     metadata, the git revision the harness recorded, the host.
+    ``applied``      set by this pipeline, where no external system could ignore it --
+                     dataset ordering, the sample cap, the grader we called.
+    ``requested``    sent to an external system and *not* verified to have taken effect. A
+                     provider that discarded it leaves this row unchanged.
+    ``editorial``    a label the reporter chose. Not a measurement, and not posing as one.
+    ``unavailable``  cannot be obtained with this code. Stated, never guessed.
+    ``n/a``          does not apply to this serving arrangement, with the reason given.
+
+    ``requested`` and ``measured`` are the load-bearing pair. Everything else exists so that
+    no row has to be padded with a plausible-looking value.
+    """
+
 
 def parameter_register(results: ResultSet, config: RunConfig) -> list[RegisterRow]:
     """The Parameter Register, filled from the run, with inapplicable rows reasoned.
@@ -200,23 +217,44 @@ def parameter_register(results: ResultSet, config: RunConfig) -> list[RegisterRo
     local = serving.get("backend") == "vllm"
     rows: list[RegisterRow] = []
 
-    def add(section: str, parameter: str, value: Any, status: str = "recorded") -> None:
-        rows.append(RegisterRow(section, parameter, str(value), status))
+    def add(section: str, parameter: str, value: Any, status: str = "recorded",
+            provenance: str = "requested") -> None:
+        rows.append(RegisterRow(section, parameter, str(value), status, provenance))
 
     # A · model identity and quantization
-    add("A · Model identity", "model_id", ", ".join(results.models))
+    add("A · Model identity", "model_id", ", ".join(results.models), provenance="measured")
     add("A · Model identity", "base_model_family",
-        ", ".join(sorted({c.family for c in results})))
-    params = {m.label: getattr(m, "params_b", None) for m in config.models}
+        ", ".join(sorted({c.family for c in results})), provenance="measured")
+    weights = (first.serving if first else {}) or {}
     add("A · Model identity", "param_count_billions",
-        ", ".join(f"{k} {v}B" for k, v in params.items() if v) or "undisclosed",
-        "recorded" if any(params.values()) else "undisclosed")
+        f"{weights['param_count_billions']}B (computed from the checkpoint on disk)"
+        if weights.get("param_count_billions") else "checkpoint not measured for this run",
+        "recorded" if weights.get("param_count_billions") else "missing",
+        provenance="measured" if weights.get("param_count_billions") else "unavailable")
     if local:
-        add("A · Model identity", "quant_scheme",
-            serving.get("quantization", "none") + f" ({serving.get('dtype', '?')})")
-        add("A · Model identity", "bits_per_weight",
-            "16 (bfloat16)" if serving.get("quantization") in (None, "none")
-            else serving.get("quantization"))
+        # Declared, not verified. The pipeline asks vLLM to serve at this precision; it does
+        # not read the precision back from the running server, so a server that ignored the
+        # flag would leave this row unchanged.
+        # Prefer what the server reported about itself over what we asked it for.
+        reported = (first.serving if first else {}) or {}
+        if reported.get("dtype") or reported.get("quantization"):
+            add("A · Model identity", "quant_scheme",
+                f"{reported.get('quantization', '?')} (dtype {reported.get('dtype', '?')}), "
+                "reported by the server", provenance="measured")
+            add("A · Model identity", "bits_per_weight",
+                "16 (bfloat16)" if "bfloat16" in reported.get("dtype", "") else "see dtype",
+                provenance="measured")
+        else:
+            add("A · Model identity", "quant_scheme",
+                f"requested {serving.get('quantization', 'none')} "
+                f"(dtype {serving.get('dtype', '?')}); the server did not report it back",
+                "recorded", provenance="requested")
+            add("A · Model identity", "bits_per_weight",
+                f"{weights['bits_per_weight']} (from the checkpoint dtype "
+                f"{weights.get('checkpoint_dtype', '?')})" if weights.get("bits_per_weight")
+                else "checkpoint not measured for this run",
+                "recorded" if weights.get("bits_per_weight") else "missing",
+                provenance="measured" if weights.get("bits_per_weight") else "unavailable")
     else:
         add("A · Model identity", "quant_scheme", "not disclosed by the router", "undisclosed")
         add("A · Model identity", "bits_per_weight", "unknown", "undisclosed")
@@ -229,65 +267,138 @@ def parameter_register(results: ResultSet, config: RunConfig) -> list[RegisterRo
         ("file_hash_sha256", "no local single-file artifact; the dataset fingerprint is the "
                              "analogous integrity field and is recorded"),
     ):
-        add("A · Model identity", parameter, why, "not applicable")
+        add("A · Model identity", parameter, why, "not applicable", provenance="n/a")
 
     # B · inference configuration — per benchmark, because that is where it is held constant
     for task in config.tasks:
         bench = config.catalog[task.benchmark]
+        cell = next((c for c in ok if c.task_key == task.key), None)
+        applied = dict((cell.applied_generate_config if cell else {}) or {})
+        # epochs is an eval-level setting, not a generate-config one; the harness records it
+        # separately and reading it back is what makes it measured rather than restated.
+        applied.update((cell.eval_config if cell else {}) or {})
         for key, spec in bench.protocol.items():
             source = "benchmark protocol" if spec.get("source") == "task" else "pipeline choice"
-            add("B · Inference", f"{task.key} · {key}", f"{spec['value']} ({source})")
-    add("B · Inference", "random_seed · generation", first.seed if first else "—")
+            # Prefer what the harness recorded as applied over what the catalog declared.
+            # They should agree; where they do not, the applied value is what made the score.
+            if key in applied:
+                value = f"{applied[key]} ({source}, applied)"
+                prov = "measured"
+                if applied[key] != spec["value"]:
+                    value += f" — DECLARED {spec['value']}, NOT APPLIED"
+            else:
+                # epochs is applied by the harness itself, so nothing external can drop it.
+                # temperature and max_tokens are sent to a provider and may be ignored.
+                # Applied by the harness itself, so nothing external could drop it. Named
+                # distinctly: `local` above means "the model is served locally" and reusing
+                # it here silently flipped the environment section to the hosted branch.
+                harness_applied = key in {"epochs"}
+                value = (f"{spec['value']} ({source}, "
+                         f"{'applied' if harness_applied else 'requested, not read back'})")
+                prov = "applied" if harness_applied else "requested"
+            add("B · Inference", f"{task.key} · {key}", value, provenance=prov)
+    seed_applied = (first.applied_generate_config.get("seed") if first else None)
+    add("B · Inference", "random_seed · generation",
+        f"{seed_applied} (applied)" if seed_applied is not None
+        else f"{first.seed if first else '—'} (sent; provider did not report it back)",
+        provenance="measured" if seed_applied is not None else "requested")
+    shuffle_applied = (first.eval_config.get("sample_shuffle") if first else None)
     add("B · Inference", "random_seed · dataset order",
-        first.sample_shuffle if first else "—")
-    add("B · Inference", "top_p / top_k / repetition_penalty",
-        "unset; the serving default applies uniformly to all models", "undisclosed")
-    add("B · Inference", "max_context_window", serving.get("max_model_len", "—")
-        if local else "provider default", "recorded" if local else "undisclosed")
+        f"{shuffle_applied} (applied, read back from the harness)" if shuffle_applied
+        is not None else f"{first.sample_shuffle if first else '—'} (set, not read back)",
+        provenance="measured" if shuffle_applied is not None else "applied")
+    top_p_applied = (first.applied_generate_config.get("top_p") if first else None)
+    add("B · Inference", "top_p",
+        f"{top_p_applied} (applied)" if top_p_applied is not None
+        else "not set for this run; the serving default applied and was not reported back",
+        "recorded" if top_p_applied is not None else "missing",
+        provenance="measured" if top_p_applied is not None else "unavailable")
+    add("B · Inference", "top_k / repetition_penalty",
+        "not reachable through this stack: Inspect's OpenAI-compatible provider does not "
+        "forward either parameter, so the server default applies and cannot be set or read",
+        "not applicable", provenance="n/a")
+    served_ctx = (first.serving or {}).get("max_model_len") if first else None
+    add("B · Inference", "max_context_window",
+        f"{served_ctx} (reported by the server)" if served_ctx
+        else (f"requested {serving.get('max_model_len')}; not reported back" if local
+              else "provider default, not reported"),
+        "recorded" if served_ctx else "missing",
+        provenance="measured" if served_ctx else ("requested" if local else "unavailable"))
+    applied_conc = (first.applied_generate_config.get("max_connections") if first else None)
     add("B · Inference", "batch_size (concurrency)",
-        f"{first.max_connections} concurrent requests" if first else "—")
-    add("B · Inference", "system_prompt_id",
-        "xstest: 'You are a helpful assistant.' (set by the task); "
-        "sycophancy / strong_reject: none")
+        f"{applied_conc or (first.max_connections if first else '—')} concurrent requests",
+        provenance="measured" if applied_conc else "applied")
+    prompts = {c.task_key: (c.system_prompt or "none") for c in ok}
+    add("B · Inference", "system_prompt",
+        "; ".join(f"{k}: {v[:60]!r}" if v != "none" else f"{k}: none"
+                  for k, v in sorted(prompts.items())) or "—",
+        provenance="measured" if prompts else "unavailable")
     for parameter, why in (("rope_scaling", "model default; not overridden"),):
-        add("B · Inference", parameter, why, "not applicable")
+        add("B · Inference", parameter, why, "not applicable", provenance="n/a")
 
     # C · hardware and environment
     if local:
+        engine = (first.serving or {}).get("engine_version") if first else None
         add("C · Environment", "inference_backend",
-            f"vLLM (dtype {serving.get('dtype')}, max_model_len {serving.get('max_model_len')})")
-        add("C · Environment", "gpu_model", serving.get("gpu_model", "recorded at run time"))
-        add("C · Environment", "driver_version", serving.get("driver_version", "recorded at run time"))
+            f"vLLM {engine}" if engine else "vLLM (version not reported for this run)",
+            "recorded" if engine else "missing",
+            provenance="measured" if engine else "requested")
+        # Read from the run's metadata where the runner captured it. Previously these rows
+        # held the literal string "recorded at run time" while claiming status "recorded" --
+        # a placeholder presented as a measurement, which is the exact failure this register
+        # exists to prevent.
+        host = (results.metadata.host or {}) if hasattr(results.metadata, "host") else {}
+        for key, label in (("gpu_model", "gpu_model"), ("gpu_count", "gpu_count"),
+                           ("driver_version", "driver_version"),
+                           ("cuda_version", "cuda_version")):
+            value = host.get(key)
+            # `captured` is set when the host was read after the run rather than during it.
+            # Accurate and not measured-at-run-time are different claims, and the row says
+            # which one it is.
+            note = host.get("captured")
+            add("C · Environment", label,
+                f"{value} ({note})" if value and note else (value or
+                "not recorded for this run"),
+                "recorded" if value else "missing",
+                provenance="measured" if value else "unavailable")
     else:
         add("C · Environment", "inference_backend", "hosted API (provider-routed)")
         for parameter in ("gpu_model", "gpu_count", "cpu_model", "system_ram_gb",
                           "driver_version", "quant_backend_version"):
             add("C · Environment", parameter,
                 "models run on the provider's hardware, which is not disclosed",
-                "not applicable")
+                "not applicable", provenance="n/a")
 
     # D · classification
     add("D · Classification", "benchmark_category",
-        "Safety — over-refusal, under-refusal, sycophancy")
+        "Safety — over-refusal, under-refusal, sycophancy", provenance="editorial")
     add("D · Classification", "metric_type",
-        "Refusal calibration; harmful-uplift; sycophancy. Not accuracy.")
+        "Refusal calibration; harmful-uplift; sycophancy. Not accuracy.",
+        provenance="editorial")
     add("D · Classification", "dataset_version",
         "; ".join(sorted({f"{c.task_key} {c.full_task_version}" for c in ok
-                          if c.full_task_version})) or "—")
-    add("D · Classification", "industry_vertical / use_case_tags",
-        "sales-classification fields with no bearing on a safety measurement",
-        "not applicable")
+                          if c.full_task_version})) or "—", provenance="measured")
+
 
     # E · tool and pipeline metadata
     add("E · Pipeline", "eval_tool_version",
         f"inspect_ai {meta.inspect_ai_version}, inspect_evals {meta.inspect_evals_version}, "
-        f"pipeline {meta.pipeline_version}")
-    add("E · Pipeline", "eval_tool_commit_hash", meta.command or _git_commit())
-    add("E · Pipeline", "run_timestamp", meta.started_utc)
-    add("E · Pipeline", "run_duration_seconds", f"{results.total_wall_clock_s:.0f}")
+        f"pipeline {meta.pipeline_version}", provenance="measured")
+    # The commit the RUN happened at, from the harness's own record. `git rev-parse HEAD` at
+    # report time answers a different question and was previously reporting a later commit.
+    commit = next((c.run_commit for c in ok if c.run_commit), None)
+    dirty = next((c.run_commit_dirty for c in ok if c.run_commit is not None), None)
+    add("E · Pipeline", "eval_tool_commit_hash",
+        f"{commit}{' (working tree DIRTY: the commit alone does not reproduce this run)' if dirty else ''}"
+        if commit else "not recorded in the log",
+        "recorded" if commit else "missing",
+        provenance="measured" if commit else "unavailable")
+    add("E · Pipeline", "run_timestamp", meta.started_utc, provenance="measured")
+    add("E · Pipeline", "run_duration_seconds", f"{results.total_wall_clock_s:.0f}",
+        provenance="measured")
     add("E · Pipeline", "dataset_fingerprint",
         "; ".join(sorted({f"{c.task_key}: {c.dataset_fingerprint}" for c in ok
-                          if c.dataset_fingerprint})) or "—")
+                          if c.dataset_fingerprint})) or "—", provenance="measured")
     return rows
 
 

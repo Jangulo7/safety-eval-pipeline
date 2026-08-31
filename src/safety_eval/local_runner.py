@@ -79,6 +79,119 @@ class LocalRunSummary:
     failures: dict[str, str] = field(default_factory=dict)
 
 
+def measure_weights(repo: str, home: Path | None = None) -> dict[str, str]:
+    """Parameter count and bits-per-weight, computed from the checkpoint on disk.
+
+    `model.safetensors.index.json` records the total byte size of the weights. Dividing by
+    the bytes-per-element of the storage dtype gives the parameter count exactly. This is a
+    measurement of the artefact that was served, not a figure copied from a model card.
+    """
+    import json
+
+    facts: dict[str, str] = {}
+    root = hf_cache_dir(repo, home) / "snapshots"
+    if not root.is_dir():
+        return facts
+    snapshot = next((d for d in root.iterdir() if d.is_dir()), None)
+    if snapshot is None:
+        return facts
+
+    total = None
+    index = snapshot / "model.safetensors.index.json"
+    if index.exists():
+        try:
+            total = json.loads(index.read_text())["metadata"]["total_size"]
+        except Exception:
+            total = None
+    if total is None:
+        shards = list(snapshot.glob("*.safetensors"))
+        total = sum(s.stat().st_size for s in shards) if shards else None
+    if not total:
+        return facts
+
+    bytes_per_param = 2  # bf16/fp16 checkpoints; fp8 checkpoints would be 1
+    try:
+        cfg = json.loads((snapshot / "config.json").read_text())
+        dtype = str(cfg.get("torch_dtype", "bfloat16"))
+        bytes_per_param = 1 if "fp8" in dtype or "int8" in dtype else 2
+        facts["checkpoint_dtype"] = dtype
+    except Exception:
+        pass
+
+    params = total / bytes_per_param
+    facts["param_count_billions"] = f"{params / 1e9:.2f}"
+    facts["bits_per_weight"] = str(bytes_per_param * 8)
+    facts["checkpoint_bytes"] = str(total)
+    return facts
+
+
+def query_serving(base_url: str, api_key: str, log_path: Path | None) -> dict[str, str]:
+    """Ask the running server what it is actually serving.
+
+    The configuration says what we asked for. This says what answered. `max_model_len` comes
+    from the server's own model list; dtype and quantization are parsed from its startup log,
+    which is the only place vLLM reports the resolved values.
+    """
+    facts: dict[str, str] = {}
+    try:
+        import requests
+
+        r = requests.get(f"{base_url.rstrip('/')}/models",
+                         headers={"Authorization": f"Bearer {api_key}"}, timeout=15)
+        if r.status_code == 200:
+            data = (r.json().get("data") or [{}])[0]
+            if data.get("max_model_len"):
+                facts["max_model_len"] = str(data["max_model_len"])
+            if data.get("id"):
+                facts["served_model_id"] = str(data["id"])
+    except Exception:
+        pass
+    try:
+        import re
+
+        text = Path(log_path).read_text(errors="replace") if log_path else ""
+        for key, pattern in (("dtype", r"dtype=(torch\.\w+)"),
+                             ("quantization", r"quantization=(\w+)"),
+                             ("engine_version", r"V1 LLM engine \(v([0-9.]+)\)")):
+            m = re.search(pattern, text)
+            if m:
+                facts[key] = m.group(1)
+    except Exception:
+        pass
+    return facts
+
+
+def capture_host() -> dict[str, str]:
+    """Query the machine the models actually ran on.
+
+    Measured, not configured. A register row that reads "recorded at run time" while nothing
+    was recorded is worse than an empty one: it claims evidence that does not exist.
+    """
+    import subprocess
+
+    out: dict[str, str] = {}
+    try:
+        r = subprocess.run(
+            ["nvidia-smi", "--query-gpu=name,driver_version", "--format=csv,noheader"],
+            capture_output=True, text=True, timeout=20, check=False)
+        lines = [x.strip() for x in r.stdout.splitlines() if x.strip()]
+        if lines:
+            name, driver = (lines[0].split(",") + [""])[:2]
+            out["gpu_model"] = name.strip()
+            out["driver_version"] = driver.strip()
+            out["gpu_count"] = str(len(lines))
+    except Exception:
+        pass
+    try:
+        import torch
+
+        if getattr(torch.version, "cuda", None):
+            out["cuda_version"] = torch.version.cuda
+    except Exception:
+        pass
+    return out
+
+
 def hf_cache_dir(repo: str, home: Path | None = None) -> Path:
     """The HuggingFace hub directory for a repo id."""
     root = Path(home or os.environ.get("HF_HOME") or Path.home() / ".cache" / "huggingface")
@@ -228,6 +341,7 @@ class LocalMatrixRunner:
         self._popen = popen
         self._eval_fn = eval_fn
         self.log_dir = Path(config.output.log_dir) / "servers"
+        self.serving_facts: dict[str, str] = {}
         self.base_url = f"http://127.0.0.1:{port}/v1"
         self.api_key = os.environ.get("VLLM_API_KEY", "inspectai")
         self.versions = harness_versions()
@@ -271,6 +385,7 @@ class LocalMatrixRunner:
             log(f"    server log: {log_path}")
             raise
         log(f"    server ready, serving: {', '.join(served)}")
+        self.serving_facts = query_serving(self.base_url, self.api_key, log_path)
         return proc
 
     def stop_server(self, proc: Any, log: Callable[[str], None]) -> None:
@@ -321,6 +436,7 @@ class LocalMatrixRunner:
             inspect_ai_version=self.versions["inspect_ai"],
             inspect_evals_version=self.versions["inspect_evals"],
             pipeline_version=self.versions["safety_eval"],
+            host=capture_host(),
         )
         results = ResultSet(meta)
         summary = LocalRunSummary(
@@ -357,7 +473,9 @@ class LocalMatrixRunner:
             proc = None
             try:
                 proc = self.start_server(plan, log)
+                weights = measure_weights(plan.repo, self.hf_home)
                 for cell in self._evaluate(plan, log):
+                    cell.serving = {**self.serving_facts, **weights}
                     results.add(cell)
             except Exception as exc:
                 summary.failures[plan.repo] = f"{type(exc).__name__}: {exc}"

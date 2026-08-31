@@ -117,6 +117,27 @@ class CellResult:
     """Inspect's own dataset identity hash — evidence that two runs used the same items."""
 
     dataset_samples_total: int | None = None
+
+    run_commit: str | None = None
+    """The commit the run executed at, read from the eval log. Distinct from whatever HEAD
+    happens to be when the report is rendered -- reporting the latter is a false provenance
+    claim that looks precise."""
+
+    run_commit_dirty: bool | None = None
+    """Whether the working tree carried uncommitted changes during the run. A commit alone
+    does not reproduce a dirty tree, so the flag travels with it."""
+
+    system_prompt: str | None = None
+    """The system message actually sent, read back from the log's first sample. ``None``
+    means the log shows no system message; it does not mean unknown."""
+
+    eval_config: dict[str, Any] = field(default_factory=dict)
+    """The run configuration the harness recorded, including epochs and the dataset-order
+    seed. Measured, not restated from our own config."""
+
+    serving: dict[str, Any] = field(default_factory=dict)
+    """What the serving stack reported about itself at run time -- engine version, dtype,
+    quantization, context length. Empty when it could not be queried."""
     max_connections: int | None = None
     n_requested: int = 0
     n_completed: int = 0
@@ -201,6 +222,10 @@ class RunMetadata:
     inspect_evals_version: str | None = None
     pipeline_version: str | None = None
     command: str | None = None
+    host: dict[str, Any] = field(default_factory=dict)
+    """Hardware the run executed on, queried at run time. Empty when not captured -- which
+    the report states, rather than printing a placeholder."""
+
     notes: str = ""
 
 

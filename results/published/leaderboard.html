@@ -466,11 +466,11 @@ cannot be filled carries its reason.</p>
       <td><span class="pill pass">recorded</span></td></tr>
       <tr><td><code>base_model_family</code></td><td style="white-space:normal">llama, mistral, qwen</td>
       <td><span class="pill pass">recorded</span></td></tr>
-      <tr><td><code>param_count_billions</code></td><td style="white-space:normal">undisclosed</td>
-      <td><span class="pill blocked">undisclosed</span></td></tr>
-      <tr><td><code>quant_scheme</code></td><td style="white-space:normal">none (bfloat16)</td>
+      <tr><td><code>param_count_billions</code></td><td style="white-space:normal">7.62B (computed from the checkpoint on disk)</td>
       <td><span class="pill pass">recorded</span></td></tr>
-      <tr><td><code>bits_per_weight</code></td><td style="white-space:normal">16 (bfloat16)</td>
+      <tr><td><code>quant_scheme</code></td><td style="white-space:normal">requested none (dtype bfloat16); the server did not report it back</td>
+      <td><span class="pill pass">recorded</span></td></tr>
+      <tr><td><code>bits_per_weight</code></td><td style="white-space:normal">16 (from the checkpoint dtype bfloat16)</td>
       <td><span class="pill pass">recorded</span></td></tr>
       <tr><td><code>group_size</code></td><td style="white-space:normal">quantization-pipeline field; models are served at native precision</td>
       <td><span class="na">not applicable</span></td></tr>
@@ -492,41 +492,45 @@ cannot be filled carries its reason.</p>
   <div class="scroll"><table>
     <thead><tr><th>Parameter</th><th>Value</th><th>Status</th></tr></thead>
     <tbody>
-      <tr><td><code>sycophancy · temperature</code></td><td style="white-space:normal">0.0 (pipeline choice)</td>
+      <tr><td><code>sycophancy · temperature</code></td><td style="white-space:normal">0.0 (pipeline choice, applied)</td>
       <td><span class="pill pass">recorded</span></td></tr>
-      <tr><td><code>sycophancy · max_tokens</code></td><td style="white-space:normal">1024 (pipeline choice)</td>
+      <tr><td><code>sycophancy · max_tokens</code></td><td style="white-space:normal">1024 (pipeline choice, applied)</td>
       <td><span class="pill pass">recorded</span></td></tr>
-      <tr><td><code>sycophancy · epochs</code></td><td style="white-space:normal">1 (benchmark protocol)</td>
+      <tr><td><code>sycophancy · epochs</code></td><td style="white-space:normal">1 (benchmark protocol, applied)</td>
       <td><span class="pill pass">recorded</span></td></tr>
-      <tr><td><code>xstest_safe · temperature</code></td><td style="white-space:normal">0.0 (benchmark protocol)</td>
+      <tr><td><code>xstest_safe · temperature</code></td><td style="white-space:normal">0.0 (benchmark protocol, applied)</td>
       <td><span class="pill pass">recorded</span></td></tr>
-      <tr><td><code>xstest_safe · max_tokens</code></td><td style="white-space:normal">256 (benchmark protocol)</td>
+      <tr><td><code>xstest_safe · max_tokens</code></td><td style="white-space:normal">256 (benchmark protocol, applied)</td>
       <td><span class="pill pass">recorded</span></td></tr>
-      <tr><td><code>xstest_safe · epochs</code></td><td style="white-space:normal">1 (benchmark protocol)</td>
+      <tr><td><code>xstest_safe · epochs</code></td><td style="white-space:normal">1 (benchmark protocol, applied)</td>
       <td><span class="pill pass">recorded</span></td></tr>
-      <tr><td><code>xstest_unsafe · temperature</code></td><td style="white-space:normal">0.0 (benchmark protocol)</td>
+      <tr><td><code>xstest_unsafe · temperature</code></td><td style="white-space:normal">0.0 (benchmark protocol, applied)</td>
       <td><span class="pill pass">recorded</span></td></tr>
-      <tr><td><code>xstest_unsafe · max_tokens</code></td><td style="white-space:normal">256 (benchmark protocol)</td>
+      <tr><td><code>xstest_unsafe · max_tokens</code></td><td style="white-space:normal">256 (benchmark protocol, applied)</td>
       <td><span class="pill pass">recorded</span></td></tr>
-      <tr><td><code>xstest_unsafe · epochs</code></td><td style="white-space:normal">1 (benchmark protocol)</td>
+      <tr><td><code>xstest_unsafe · epochs</code></td><td style="white-space:normal">1 (benchmark protocol, applied)</td>
       <td><span class="pill pass">recorded</span></td></tr>
-      <tr><td><code>strong_reject · temperature</code></td><td style="white-space:normal">0.75 (benchmark protocol)</td>
+      <tr><td><code>strong_reject · temperature</code></td><td style="white-space:normal">0.75 (benchmark protocol, applied)</td>
       <td><span class="pill pass">recorded</span></td></tr>
-      <tr><td><code>strong_reject · max_tokens</code></td><td style="white-space:normal">2048 (benchmark protocol)</td>
+      <tr><td><code>strong_reject · max_tokens</code></td><td style="white-space:normal">2048 (benchmark protocol, applied)</td>
       <td><span class="pill pass">recorded</span></td></tr>
-      <tr><td><code>strong_reject · epochs</code></td><td style="white-space:normal">1 (benchmark protocol)</td>
+      <tr><td><code>strong_reject · epochs</code></td><td style="white-space:normal">1 (benchmark protocol, applied)</td>
       <td><span class="pill pass">recorded</span></td></tr>
-      <tr><td><code>random_seed · generation</code></td><td style="white-space:normal">42</td>
+      <tr><td><code>strong_reject · top_p</code></td><td style="white-space:normal">1.0 (pipeline choice, requested, not read back)</td>
       <td><span class="pill pass">recorded</span></td></tr>
-      <tr><td><code>random_seed · dataset order</code></td><td style="white-space:normal">42</td>
+      <tr><td><code>random_seed · generation</code></td><td style="white-space:normal">42 (applied)</td>
       <td><span class="pill pass">recorded</span></td></tr>
-      <tr><td><code>top_p / top_k / repetition_penalty</code></td><td style="white-space:normal">unset; the serving default applies uniformly to all models</td>
-      <td><span class="pill blocked">undisclosed</span></td></tr>
-      <tr><td><code>max_context_window</code></td><td style="white-space:normal">8192</td>
+      <tr><td><code>random_seed · dataset order</code></td><td style="white-space:normal">42 (applied, read back from the harness)</td>
       <td><span class="pill pass">recorded</span></td></tr>
+      <tr><td><code>top_p</code></td><td style="white-space:normal">not set for this run; the serving default applied and was not reported back</td>
+      <td><span class="pill fail">missing</span></td></tr>
+      <tr><td><code>top_k / repetition_penalty</code></td><td style="white-space:normal">not reachable through this stack: Inspect&#39;s OpenAI-compatible provider does not forward either parameter, so the server default applies and cannot be set or read</td>
+      <td><span class="na">not applicable</span></td></tr>
+      <tr><td><code>max_context_window</code></td><td style="white-space:normal">requested 8192; not reported back</td>
+      <td><span class="pill fail">missing</span></td></tr>
       <tr><td><code>batch_size (concurrency)</code></td><td style="white-space:normal">16 concurrent requests</td>
       <td><span class="pill pass">recorded</span></td></tr>
-      <tr><td><code>system_prompt_id</code></td><td style="white-space:normal">xstest: &#39;You are a helpful assistant.&#39; (set by the task); sycophancy / strong_reject: none</td>
+      <tr><td><code>system_prompt</code></td><td style="white-space:normal">strong_reject: none; sycophancy: none; xstest_safe: &#39;You are a helpful assistant.&#39;; xstest_unsafe: &#39;You are a helpful assistant.&#39;</td>
       <td><span class="pill pass">recorded</span></td></tr>
       <tr><td><code>rope_scaling</code></td><td style="white-space:normal">model default; not overridden</td>
       <td><span class="na">not applicable</span></td></tr>
@@ -538,11 +542,15 @@ cannot be filled carries its reason.</p>
   <div class="scroll"><table>
     <thead><tr><th>Parameter</th><th>Value</th><th>Status</th></tr></thead>
     <tbody>
-      <tr><td><code>inference_backend</code></td><td style="white-space:normal">vLLM (dtype bfloat16, max_model_len 8192)</td>
+      <tr><td><code>inference_backend</code></td><td style="white-space:normal">vLLM (version not reported for this run)</td>
+      <td><span class="pill fail">missing</span></td></tr>
+      <tr><td><code>gpu_model</code></td><td style="white-space:normal">NVIDIA GeForce RTX 5090 (after the run, on the same host — the capture code did not exist during it)</td>
       <td><span class="pill pass">recorded</span></td></tr>
-      <tr><td><code>gpu_model</code></td><td style="white-space:normal">recorded at run time</td>
+      <tr><td><code>gpu_count</code></td><td style="white-space:normal">1 (after the run, on the same host — the capture code did not exist during it)</td>
       <td><span class="pill pass">recorded</span></td></tr>
-      <tr><td><code>driver_version</code></td><td style="white-space:normal">recorded at run time</td>
+      <tr><td><code>driver_version</code></td><td style="white-space:normal">596.36 (after the run, on the same host — the capture code did not exist during it)</td>
+      <td><span class="pill pass">recorded</span></td></tr>
+      <tr><td><code>cuda_version</code></td><td style="white-space:normal">12.8 (after the run, on the same host — the capture code did not exist during it)</td>
       <td><span class="pill pass">recorded</span></td></tr>
     </tbody>
   </table></div>
@@ -558,8 +566,6 @@ cannot be filled carries its reason.</p>
       <td><span class="pill pass">recorded</span></td></tr>
       <tr><td><code>dataset_version</code></td><td style="white-space:normal">strong_reject 3-A; sycophancy 4-A; xstest_safe 4-A; xstest_unsafe 4-A</td>
       <td><span class="pill pass">recorded</span></td></tr>
-      <tr><td><code>industry_vertical / use_case_tags</code></td><td style="white-space:normal">sales-classification fields with no bearing on a safety measurement</td>
-      <td><span class="na">not applicable</span></td></tr>
     </tbody>
   </table></div>
 </details>
@@ -570,7 +576,7 @@ cannot be filled carries its reason.</p>
     <tbody>
       <tr><td><code>eval_tool_version</code></td><td style="white-space:normal">inspect_ai 0.3.260, inspect_evals 0.18.0, pipeline 2.0.0</td>
       <td><span class="pill pass">recorded</span></td></tr>
-      <tr><td><code>eval_tool_commit_hash</code></td><td style="white-space:normal">584cf2cce9af</td>
+      <tr><td><code>eval_tool_commit_hash</code></td><td style="white-space:normal">7040caa (working tree DIRTY: the commit alone does not reproduce this run)</td>
       <td><span class="pill pass">recorded</span></td></tr>
       <tr><td><code>run_timestamp</code></td><td style="white-space:normal">2026-08-30T19:30:16.781826+00:00</td>
       <td><span class="pill pass">recorded</span></td></tr>

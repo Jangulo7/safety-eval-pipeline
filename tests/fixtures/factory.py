@@ -159,6 +159,10 @@ def make_results(
                 protocol_source={k: v.get("source", "pipeline")
                                  for k, v in bench.protocol.items()},
                 applied_generate_config=bench.generate_params(),
+                eval_config={"epochs": int((bench.protocol.get("epochs") or {}).get("value", 1)),
+                             "sample_shuffle": 42},
+                run_commit="fixture0",
+                run_commit_dirty=False,
                 dataset_fingerprint=f"{bench_key}_fixture_a1b2c3d4",
                 strata_covered=len(STRATA.get(bench_key, [])),
                 strata_total=int(

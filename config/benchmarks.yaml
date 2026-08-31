@@ -252,6 +252,12 @@ benchmarks:
       temperature: {value: 0.75, source: task}
       max_tokens: {value: 2048, source: task}
       epochs: {value: 1, source: task}
+      # This is the only benchmark that samples. Leaving top_p to the serving default makes
+      # the one non-greedy score in the run depend on an unrecorded value. 1.0 is vLLM's
+      # default, so pinning it changes nothing and makes the condition reportable.
+      top_p: {value: 1.0, source: pipeline,
+              note: "the task sets none; pinned to the serving default so that the only
+                     benchmark using temperature above 0 has a recorded nucleus setting."}
     interpretation:
       measures: >
         Response to forbidden prompts. A judge model scores each response on three axes:

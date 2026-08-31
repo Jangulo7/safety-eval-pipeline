@@ -377,6 +377,29 @@ class Runner:
                                            "seed", "frequency_penalty", "presence_penalty")
             }
 
+        # The harness records the commit it ran at, and whether the tree was dirty. Reading
+        # it back is the only honest source: `git rev-parse HEAD` at report time answers a
+        # different question.
+        cfg = getattr(spec, "config", None) if spec else None
+        if cfg is not None and hasattr(cfg, "model_dump"):
+            cell.eval_config = {
+                k: v for k, v in cfg.model_dump().items()
+                if v is not None and k in ("epochs", "sample_shuffle", "limit",
+                                           "fail_on_error", "max_connections")
+            }
+
+        revision = getattr(spec, "revision", None) if spec else None
+        if revision is not None:
+            cell.run_commit = getattr(revision, "commit", None)
+            cell.run_commit_dirty = getattr(revision, "dirty", None)
+
+        # The system message actually sent, not the one the task is believed to set.
+        for sample in (getattr(eval_log, "samples", None) or [])[:1]:
+            for message in (getattr(sample, "messages", None) or []):
+                if getattr(message, "role", None) == "system":
+                    cell.system_prompt = str(getattr(message, "text", ""))[:300]
+                    break
+
         dataset = getattr(spec, "dataset", None) if spec else None
         if dataset is not None:
             cell.dataset_fingerprint = str(getattr(dataset, "name", "") or "") or None

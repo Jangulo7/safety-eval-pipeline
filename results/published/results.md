@@ -205,9 +205,9 @@ The register from this repository's pre-Inspect pipeline, filled from this run. 
 |---|---|---|
 | `model_id` | vllm/Qwen/Qwen2.5-7B-Instruct, vllm/meta-llama/Llama-3.1-8B-Instruct, vllm/mistralai/Ministral-8B-Instruct-2410 | recorded |
 | `base_model_family` | llama, mistral, qwen | recorded |
-| `param_count_billions` | undisclosed | **undisclosed** |
-| `quant_scheme` | none (bfloat16) | recorded |
-| `bits_per_weight` | 16 (bfloat16) | recorded |
+| `param_count_billions` | 7.62B (computed from the checkpoint on disk) | recorded |
+| `quant_scheme` | requested none (dtype bfloat16); the server did not report it back | recorded |
+| `bits_per_weight` | 16 (from the checkpoint dtype bfloat16) | recorded |
 | `group_size` | quantization-pipeline field; models are served at native precision | _n/a_ |
 | `pruning_method` | no pruning applied | _n/a_ |
 | `sparsity_ratio` | no pruning applied | _n/a_ |
@@ -219,33 +219,37 @@ The register from this repository's pre-Inspect pipeline, filled from this run. 
 
 | parameter | value | status |
 |---|---|---|
-| `sycophancy · temperature` | 0.0 (pipeline choice) | recorded |
-| `sycophancy · max_tokens` | 1024 (pipeline choice) | recorded |
-| `sycophancy · epochs` | 1 (benchmark protocol) | recorded |
-| `xstest_safe · temperature` | 0.0 (benchmark protocol) | recorded |
-| `xstest_safe · max_tokens` | 256 (benchmark protocol) | recorded |
-| `xstest_safe · epochs` | 1 (benchmark protocol) | recorded |
-| `xstest_unsafe · temperature` | 0.0 (benchmark protocol) | recorded |
-| `xstest_unsafe · max_tokens` | 256 (benchmark protocol) | recorded |
-| `xstest_unsafe · epochs` | 1 (benchmark protocol) | recorded |
-| `strong_reject · temperature` | 0.75 (benchmark protocol) | recorded |
-| `strong_reject · max_tokens` | 2048 (benchmark protocol) | recorded |
-| `strong_reject · epochs` | 1 (benchmark protocol) | recorded |
-| `random_seed · generation` | 42 | recorded |
-| `random_seed · dataset order` | 42 | recorded |
-| `top_p / top_k / repetition_penalty` | unset; the serving default applies uniformly to all models | **undisclosed** |
-| `max_context_window` | 8192 | recorded |
+| `sycophancy · temperature` | 0.0 (pipeline choice, applied) | recorded |
+| `sycophancy · max_tokens` | 1024 (pipeline choice, applied) | recorded |
+| `sycophancy · epochs` | 1 (benchmark protocol, applied) | recorded |
+| `xstest_safe · temperature` | 0.0 (benchmark protocol, applied) | recorded |
+| `xstest_safe · max_tokens` | 256 (benchmark protocol, applied) | recorded |
+| `xstest_safe · epochs` | 1 (benchmark protocol, applied) | recorded |
+| `xstest_unsafe · temperature` | 0.0 (benchmark protocol, applied) | recorded |
+| `xstest_unsafe · max_tokens` | 256 (benchmark protocol, applied) | recorded |
+| `xstest_unsafe · epochs` | 1 (benchmark protocol, applied) | recorded |
+| `strong_reject · temperature` | 0.75 (benchmark protocol, applied) | recorded |
+| `strong_reject · max_tokens` | 2048 (benchmark protocol, applied) | recorded |
+| `strong_reject · epochs` | 1 (benchmark protocol, applied) | recorded |
+| `strong_reject · top_p` | 1.0 (pipeline choice, requested, not read back) | recorded |
+| `random_seed · generation` | 42 (applied) | recorded |
+| `random_seed · dataset order` | 42 (applied, read back from the harness) | recorded |
+| `top_p` | not set for this run; the serving default applied and was not reported back | **missing** |
+| `top_k / repetition_penalty` | not reachable through this stack: Inspect's OpenAI-compatible provider does not forward either parameter, so the server default applies and cannot be set or read | _n/a_ |
+| `max_context_window` | requested 8192; not reported back | **missing** |
 | `batch_size (concurrency)` | 16 concurrent requests | recorded |
-| `system_prompt_id` | xstest: 'You are a helpful assistant.' (set by the task); sycophancy / strong_reject: none | recorded |
+| `system_prompt` | strong_reject: none; sycophancy: none; xstest_safe: 'You are a helpful assistant.'; xstest_unsafe: 'You are a helpful assistant.' | recorded |
 | `rope_scaling` | model default; not overridden | _n/a_ |
 
 ### C · Environment
 
 | parameter | value | status |
 |---|---|---|
-| `inference_backend` | vLLM (dtype bfloat16, max_model_len 8192) | recorded |
-| `gpu_model` | recorded at run time | recorded |
-| `driver_version` | recorded at run time | recorded |
+| `inference_backend` | vLLM (version not reported for this run) | **missing** |
+| `gpu_model` | NVIDIA GeForce RTX 5090 (after the run, on the same host — the capture code did not exist during it) | recorded |
+| `gpu_count` | 1 (after the run, on the same host — the capture code did not exist during it) | recorded |
+| `driver_version` | 596.36 (after the run, on the same host — the capture code did not exist during it) | recorded |
+| `cuda_version` | 12.8 (after the run, on the same host — the capture code did not exist during it) | recorded |
 
 ### D · Classification
 
@@ -254,14 +258,13 @@ The register from this repository's pre-Inspect pipeline, filled from this run. 
 | `benchmark_category` | Safety — over-refusal, under-refusal, sycophancy | recorded |
 | `metric_type` | Refusal calibration; harmful-uplift; sycophancy. Not accuracy. | recorded |
 | `dataset_version` | strong_reject 3-A; sycophancy 4-A; xstest_safe 4-A; xstest_unsafe 4-A | recorded |
-| `industry_vertical / use_case_tags` | sales-classification fields with no bearing on a safety measurement | _n/a_ |
 
 ### E · Pipeline
 
 | parameter | value | status |
 |---|---|---|
 | `eval_tool_version` | inspect_ai 0.3.260, inspect_evals 0.18.0, pipeline 2.0.0 | recorded |
-| `eval_tool_commit_hash` | 584cf2cce9af | recorded |
+| `eval_tool_commit_hash` | 7040caa (working tree DIRTY: the commit alone does not reproduce this run) | recorded |
 | `run_timestamp` | 2026-08-30T19:30:16.781826+00:00 | recorded |
 | `run_duration_seconds` | 1073 | recorded |
 | `dataset_fingerprint` | strong_reject: strong_reject_f32ee4d47be51ee73505df3b2009a421; sycophancy: anthropic_sycophancy_are_you_sure_eb293377533f5118d50a43aef8528899; xstest_safe: walledai/XSTest; xstest_unsafe: walledai/XSTest | recorded |
