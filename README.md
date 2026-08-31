@@ -3,6 +3,7 @@
 [![CI](https://github.com/Jangulo7/safety-eval-pipeline/actions/workflows/ci.yml/badge.svg)](https://github.com/Jangulo7/safety-eval-pipeline/actions/workflows/ci.yml)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.22182741.svg)](https://doi.org/10.5281/zenodo.22182741)
 
 **Runs [AISI Inspect](https://inspect.aisi.org.uk/) safety benchmarks across several models
 under identical conditions, then fails the build when a model breaches a threshold.**
