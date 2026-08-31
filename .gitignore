@@ -29,8 +29,16 @@ __pycache__/
 .DS_Store
 Thumbs.db
 
-# Private working notes
+# Private working notes. Any directory whose name starts with a dot and contains
+# "private", plus a couple of common variants -- a working folder should not become
+# repository content because it was renamed.
+#
+# NOTE: .gitignore does not apply to files git already tracks. `git mv` a tracked file
+# into an ignored directory and it stays tracked. Check with `git ls-files` after moving.
 .private/
+.private*/
+*-private/
+private/
 
 # Inspect logs are not committed at all.
 #
