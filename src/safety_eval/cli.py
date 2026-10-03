@@ -33,6 +33,21 @@ def _load_env() -> None:
         pass
 
 
+def _routing_override(slug: str | None):
+    """Turn `--provider SLUG` into the routing object, or `none` into an explicit unpinning.
+
+    `none` is not the same as omitting the flag: omitting it leaves whatever the config says,
+    while `none` states that this run is deliberately unpinned. The registered design needs
+    both -- the pinned cells and the two that take whatever the router gives, which is what an
+    unpinned reporter actually gets.
+    """
+    if slug is None:
+        return None
+    if slug.strip().lower() == "none":
+        return {}
+    return {"only": [slug], "allow_fallbacks": False}
+
+
 def _config(args: argparse.Namespace):
     from .catalog import Catalog
     from .config import RunConfig
@@ -49,6 +64,7 @@ def _config(args: argparse.Namespace):
         "pdf": _tri(None, getattr(args, "no_pdf", False)),
         "quantization": getattr(args, "quantization", None),
         "tool_calling": (True if getattr(args, "tool_calling", False) else None),
+        "provider_routing": _routing_override(getattr(args, "provider", None)),
     }
     return RunConfig.load(args.config, Catalog.load(args.catalog), overrides=overrides)
 
@@ -368,6 +384,13 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--temperature", type=float)
     r.add_argument("--seed", type=int)
     r.add_argument("--max-connections", type=int, dest="max_connections")
+    r.add_argument("--provider", metavar="SLUG",
+                   help="pin routing to one upstream provider, fallbacks disabled, e.g. "
+                        "`--provider DeepInfra`. Pass `none` to run deliberately unpinned and "
+                        "let the router choose per request. Pinning is a request like any "
+                        "other: the provider that actually answered is read back from the "
+                        "response and recorded, and `check --run-id` reports a pin that did "
+                        "not take effect.")
     r.add_argument("--skip-doctor", action="store_true", help="run without preflight checks")
     r.add_argument("--allow-irreproducible", action="store_true",
                    help="run even when the reproducibility gate blocks. The results will "

@@ -503,4 +503,8 @@ def _apply_overrides(data: dict[str, Any], overrides: dict[str, Any]) -> dict[st
     # not acquire the flags by accident, since they are a serving condition like any other.
     if (tool_calling := overrides.get("tool_calling")) is not None:
         data.setdefault("serving", {})["tool_calling"] = tool_calling
+    # An empty dict is meaningful here and must not be confused with "not supplied": it is a
+    # run that is deliberately unpinned, which the endpoint-spread design needs as a cell.
+    if (routing := overrides.get("provider_routing")) is not None:
+        data["provider_routing"] = routing or {}
     return data

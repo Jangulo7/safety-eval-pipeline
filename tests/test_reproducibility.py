@@ -95,7 +95,32 @@ def test_unpinned_openrouter_routing_blocks(catalog, tmp_path) -> None:
     ]))
     i = issue(v, "unpinned-routing")
     assert i and i.severity is Severity.BLOCK
-    assert "allow_fallbacks: false" in i.correction
+    # The correction must name the mechanism that actually pins, and must say how to run a
+    # deliberately unpinned cell rather than leaving that looking like a violation.
+    assert "--provider" in i.correction
+    assert "--allow-irreproducible" in i.correction
+
+
+def test_a_single_hosted_model_is_still_checked_for_pinning(catalog, tmp_path) -> None:
+    """The gap this closes: the routing check used to sit behind a `len(models) < 2` return.
+
+    The endpoint-spread design runs one model per cell, so every cell that the check exists
+    to protect would have skipped it -- the gate would have passed each unpinned cell in
+    silence and the spread would have measured routing noise.
+    """
+    v = check_config(variant(catalog, tmp_path, models=[
+        {"id": "openrouter/meta-llama/llama-3.1-8b-instruct", "family": "meta",
+         "label": "Llama 3.1 8B"},
+    ]))
+    i = issue(v, "unpinned-routing")
+    assert i and i.severity is Severity.BLOCK, "a lone hosted model must still be pinned"
+
+
+def test_a_single_local_model_needs_no_pinning(catalog, tmp_path) -> None:
+    v = check_config(variant(catalog, tmp_path, models=[
+        {"id": "vllm/meta-llama/Llama-3.1-8B-Instruct", "family": "meta", "label": "Llama"},
+    ]))
+    assert issue(v, "unpinned-routing") is None
 
 
 def test_mixed_providers_warn(catalog, tmp_path) -> None:

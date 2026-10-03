@@ -147,6 +147,13 @@ def check_config(
 
 def _check_model_set(v: Verdict, config: RunConfig) -> None:
     v.checked.append("model set")
+
+    # Routing is checked before the single-model early return below, because it is not a
+    # comparison property. A run of one hosted model still has to know which upstream
+    # answered it, and the endpoint-spread design runs exactly that: one model per cell. Left
+    # inside the early return, this check would have been skipped by every cell it matters to.
+    _check_routing_pinned(v, config)
+
     if len(config.models) < 2:
         return
 
@@ -160,19 +167,23 @@ def _check_model_set(v: Verdict, config: RunConfig) -> None:
                          "or through one hosted operator — or report per-provider results "
                          "as separate tables rather than one ranking.")
 
+def _check_routing_pinned(v: Verdict, config: RunConfig) -> None:
+    """Hosted models must say which upstream they want, or say that they want any."""
     routed = [m.id for m in config.models if m.provider == "openrouter"]
     pinned = config.raw.get("provider_routing") or {}
     if routed and not pinned:
         v.add(id="unpinned-routing", severity=Severity.BLOCK, scope="run",
-              problem="OpenRouter models are not pinned to a provider or a numeric "
-                      "precision. The router chooses per request, so the same model id can "
-                      "be served at fp8 in one cell and bf16 in another — the scores would "
-                      "not be of one artifact.",
+              problem="Hosted models are not pinned to a provider or a numeric precision. "
+                      "The router chooses per request, so the same model id can be served at "
+                      "fp8 in one cell and bf16 in another — the scores would not be of one "
+                      "artifact.",
               evidence=f"unpinned: {routed}",
-              correction="Add `provider_routing: {order: [<Provider>], "
-                         "allow_fallbacks: false, quantizations: [<fmt>]}` to "
-                         "config/eval_config.yaml, or move to locally served models where "
-                         "the precision is yours to set.")
+              correction="Pass `--provider <Slug>` for the run, or add `provider_routing` to "
+                         "the config, or move to locally served models where the precision "
+                         "is yours to set. A run that is unpinned ON PURPOSE — measuring what "
+                         "an unpinned caller actually gets — is run with "
+                         "`--provider none --allow-irreproducible`, which records that choice "
+                         "rather than hiding it.")
 
 
 def _check_sample_selection(v: Verdict, config: RunConfig, catalog: Catalog) -> None:
