@@ -47,6 +47,7 @@ def _config(args: argparse.Namespace):
         "charts": _tri(getattr(args, "charts", None), getattr(args, "no_charts", False)),
         "html": _tri(None, getattr(args, "no_html", False)),
         "pdf": _tri(None, getattr(args, "no_pdf", False)),
+        "quantization": getattr(args, "quantization", None),
     }
     return RunConfig.load(args.config, Catalog.load(args.catalog), overrides=overrides)
 
@@ -404,6 +405,12 @@ def build_parser() -> argparse.ArgumentParser:
     rl.add_argument("--limit", type=int)
     rl.add_argument("--seed", type=int)
     rl.add_argument("--max-connections", type=int, dest="max_connections")
+    rl.add_argument("--quantization", metavar="SCHEME",
+                    help="serve at this precision instead of the configured one, e.g. "
+                         "`fp8` or `none`. The scheme is a request: vLLM resolves it against "
+                         "the hardware, and the kernel it actually selects is recorded as the "
+                         "measured precision. Use this rather than editing the config between "
+                         "runs, so each run's command states its own conditions.")
     rl.add_argument("--skip-doctor", action="store_true")
     rl.add_argument("--offline", action="store_true")
     rl.add_argument("--allow-irreproducible", action="store_true")

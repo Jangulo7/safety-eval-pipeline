@@ -129,8 +129,15 @@ def query_serving(base_url: str, api_key: str, log_path: Path | None) -> dict[st
     """Ask the running server what it is actually serving.
 
     The configuration says what we asked for. This says what answered. `max_model_len` comes
-    from the server's own model list; dtype and quantization are parsed from its startup log,
-    which is the only place vLLM reports the resolved values.
+    from the server's own model list; everything else is parsed from the startup log, which is
+    the only place vLLM reports the resolved values.
+
+    `quant_backend` is the load-bearing one for a precision comparison. Requesting
+    `--quantization fp8` says nothing about the arithmetic that ran: vLLM picks a kernel for
+    the hardware it finds, and on an unsupported device that choice can be an emulated path
+    that keeps the name and loses the speedup. The kernel it names at startup is the only
+    evidence of which, so it is recorded as the measured precision and never inferred from
+    the request.
     """
     facts: dict[str, str] = {}
     try:
@@ -150,12 +157,26 @@ def query_serving(base_url: str, api_key: str, log_path: Path | None) -> dict[st
         import re
 
         text = Path(log_path).read_text(errors="replace") if log_path else ""
+        # `quantization=` cannot collide with the `quantization_config=` that follows it on
+        # the same line: the next character there is `_`, not `=`.
         for key, pattern in (("dtype", r"dtype=(torch\.\w+)"),
                              ("quantization", r"quantization=(\w+)"),
+                             ("kv_cache_dtype", r"kv_cache_dtype=(\w+)"),
                              ("engine_version", r"V1 LLM engine \(v([0-9.]+)\)")):
             m = re.search(pattern, text)
             if m:
                 facts[key] = m.group(1)
+        # vLLM logs the resolved kernel once per quantized linear method, e.g.
+        # "Selected CutlassFP8ScaledMMLinearKernel for Fp8PerTensorOnlineLinearMethod".
+        # Absent for an unquantized model, which is itself the correct reading.
+        kernel = re.search(r"Selected (\w+) for (\w+)", text)
+        if kernel:
+            facts["quant_backend"] = kernel.group(1)
+            facts["quant_method"] = kernel.group(2)
+        # vLLM writes the literal `None` when nothing was requested. Carrying that through
+        # as the string "None" would read as a missing value rather than a measured one.
+        if facts.get("quantization") == "None":
+            facts["quantization"] = "none"
     except Exception:
         pass
     return facts
@@ -370,7 +391,13 @@ class LocalMatrixRunner:
         log_path.parent.mkdir(parents=True, exist_ok=True)
         handle = log_path.open("w", encoding="utf-8")
         env = dict(os.environ)
-        env.setdefault("VLLM_LOGGING_LEVEL", "WARNING")
+        # INFO, not WARNING, because this log is the run's only record of what was actually
+        # served. vLLM reports the resolved engine config and the selected quantization
+        # kernel at INFO; at WARNING `query_serving` parses a log those lines never reached
+        # and silently records nothing. That is how run-20260830-193016 came to carry no
+        # `dtype`, `quantization` or `engine_version` at all -- the pipeline suppressed the
+        # evidence it was built to collect.
+        env.setdefault("VLLM_LOGGING_LEVEL", "INFO")
         # vLLM disables pinned memory on WSL by default and its V2 GPU runner then fails
         # with "UVA is not available". The gate is a 4.19.121 kernel; this host is far
         # above it, so the opt-in is safe and is what makes local serving work here at all.

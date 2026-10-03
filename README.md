@@ -108,7 +108,8 @@ decoding parameters. **Publishing the score alone is not reproducible.** Every r
 | **the benchmark** | task, task args, task version (`4-A`), full version string |
 | **the subject** | model id, family, provider |
 | **the judge** | grader model — judge-graded metrics move when the judge moves |
-| **the decoding** | temperature, seed, max connections |
+| **the decoding** | temperature, top-p, seed, max connections |
+| **the serving** | for a local model: dtype, quantization scheme, and the kernel the server actually chose |
 | **the denominator** | samples requested, completed, **scored**, **unscored** |
 | **the number** | metric address, value, 95% interval, interval method |
 | **the harness** | `inspect_ai` and `inspect_evals` versions |
@@ -125,6 +126,25 @@ This matters. Grader degradation and genuine compliance now push `refusal_rate` 
 direction. A falling refusal rate is good news only if `unscored` stayed near zero. So
 `unscored` appears as a column in every table, a band in the coverage chart, and a warning
 above 5%.
+
+### Asking for a precision is not getting one
+
+`--quantization fp8` is a request. The server decides what to do with it, and on hardware
+without fp8 support it can keep the name and fall back to a slower, different kernel. So the
+pipeline reads the kernel back out of the server's own startup log and records *that* as the
+precision, marked `measured`. The request is recorded separately, marked `requested`.
+
+The two can disagree, and a run that compares precisions is worthless if nobody checked. The
+same split applies to every parameter: each row in the register says whether the number was
+measured or only asked for.
+
+> **The published run does not have these fields.** `run-20260830-193016` predates the
+> read-back, and it served vLLM at a log level that hid the lines the read-back parses, so its
+> record carries no served dtype, quantization or engine version — the register marks them
+> missing rather than filling them in. Its scores are unaffected and reproduce from the
+> per-sample logs. It is kept as the historical artefact of that run and is not re-rendered
+> against the current configuration, because a report rebuilt from a config that has since
+> changed will describe conditions the run never had.
 
 ---
 

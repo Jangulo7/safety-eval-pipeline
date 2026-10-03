@@ -170,6 +170,16 @@ def test_hosted_models_mark_hardware_not_applicable(results, config, catalog, tm
     assert "provider's hardware" in rows["gpu_model"].value
     assert rows["quant_scheme"].status == "undisclosed"
 
+    # A router may well be serving a quantized checkpoint without saying so, so none of the
+    # quantization-pipeline rows may claim native precision or an absent pipeline. Behind an
+    # API these are undisclosed -- someone knows the answer -- not inapplicable.
+    for parameter in ("group_size", "healing_applied", "calibration_dataset",
+                      "pruning_method", "sparsity_ratio"):
+        row = rows[parameter]
+        assert row.status == "undisclosed", f"{parameter} claims {row.status!r} of a router"
+        assert "native precision" not in row.value
+        assert "no post-training quantization was performed" not in row.value
+
 
 # --------------------------------------------------------------------------- rendering
 
@@ -344,8 +354,57 @@ def test_serving_log_parser_reads_a_real_vllm_startup_line(tmp_path) -> None:
         "max_seq_len=8192, quantization=None, seed=42\n")
     facts = query_serving("http://127.0.0.1:59999/v1", "k", log)
     assert facts["dtype"] == "torch.bfloat16"
-    assert facts["quantization"] == "None"
     assert facts["engine_version"] == "0.28.0"
+    # vLLM writes the literal `None`. Normalised, because "None" in a published register
+    # reads as an absent value rather than a measured "nothing was quantized".
+    assert facts["quantization"] == "none"
+    assert "quant_backend" not in facts, "an unquantized server selects no quant kernel"
+
+
+def test_serving_log_parser_reads_the_selected_fp8_kernel(tmp_path) -> None:
+    """Verified against lines captured from vLLM 0.28.0 serving fp8 on an RTX 5090 (sm_120).
+
+    The kernel name is the whole point of the row: `--quantization fp8` is a request, and on
+    hardware without fp8 support vLLM honours the name while falling back to an emulated
+    path. Only this line distinguishes the two.
+    """
+    from safety_eval.local_runner import query_serving
+
+    log = tmp_path / "vllm.log"
+    log.write_text(
+        "(EngineCore pid=15906) INFO [core.py:122] Initializing a V1 LLM engine (v0.28.0) "
+        "with config: model='meta-llama/Llama-3.1-8B-Instruct', dtype=torch.bfloat16, "
+        "max_seq_len=8192, quantization=fp8, quantization_config=None, "
+        "kv_cache_dtype=auto, seed=42\n"
+        "(EngineCore pid=15906) INFO [__init__.py:720] Selected "
+        "CutlassFP8ScaledMMLinearKernel for Fp8PerTensorOnlineLinearMethod\n")
+    facts = query_serving("http://127.0.0.1:59999/v1", "k", log)
+    # `quantization=` must not be captured from the `quantization_config=` beside it.
+    assert facts["quantization"] == "fp8"
+    assert facts["kv_cache_dtype"] == "auto"
+    assert facts["quant_backend"] == "CutlassFP8ScaledMMLinearKernel"
+    assert facts["quant_method"] == "Fp8PerTensorOnlineLinearMethod"
+
+
+def test_an_fp8_run_does_not_report_sixteen_bits_per_weight(results, config) -> None:
+    """The bug this guards: vLLM quantizes a bf16 checkpoint and keeps reporting
+    `dtype=torch.bfloat16`, so reading the bit width off `dtype` reports 16 bits for an
+    8-bit run -- in the register of the very run whose purpose is to change precision."""
+    for cell in results:
+        cell.serving = {"dtype": "torch.bfloat16", "quantization": "fp8",
+                        "quant_backend": "CutlassFP8ScaledMMLinearKernel",
+                        "quant_method": "Fp8PerTensorOnlineLinearMethod",
+                        "engine_version": "0.28.0", "max_model_len": "8192"}
+    rows = {r.parameter: r for r in parameter_register(results, config)}
+    assert rows["bits_per_weight"].value.startswith("8")
+    assert rows["bits_per_weight"].provenance == "measured"
+    # The kernel reaches the published register, not just the log.
+    assert "CutlassFP8ScaledMMLinearKernel" in rows["quant_scheme"].value
+    assert rows["quant_scheme"].provenance == "measured"
+    # These three were hardcoded to the unquantized case and would now be false.
+    assert "no post-training quantization" not in rows["calibration_dataset"].value
+    assert "no quantization or pruning" not in rows["healing_applied"].value
+    assert "native precision" not in rows["group_size"].value
 
 
 def test_published_artefacts_agree_with_results_json(config) -> None:

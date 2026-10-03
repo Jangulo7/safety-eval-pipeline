@@ -442,8 +442,9 @@ def interpolate(data: Any, root: dict[str, Any] | None = None) -> Any:
 def _apply_overrides(data: dict[str, Any], overrides: dict[str, Any]) -> dict[str, Any]:
     """Apply CLI/UI overrides onto loaded config data.
 
-    Supported keys: ``models`` (list of ids), ``tasks`` (list of keys), and any scalar in
-    ``defaults``. Filtering to an unknown id or key is an error, not a silent empty matrix.
+    Supported keys: ``models`` (list of ids), ``tasks`` (list of keys), any scalar in
+    ``defaults``, the output switches, and ``quantization`` in ``serving``. Filtering to an
+    unknown id or key is an error, not a silent empty matrix.
     """
     data = dict(data)
     if models := overrides.get("models"):
@@ -492,4 +493,10 @@ def _apply_overrides(data: dict[str, Any], overrides: dict[str, Any]) -> dict[st
     for key in ("charts", "html", "pdf"):
         if (value := overrides.get(key)) is not None:
             data.setdefault("output", {})[key] = value
+    # Serving precision is the manipulated variable of the precision comparison, so it has to
+    # be settable per run. Editing `quantization` in the config file between two runs would
+    # change a condition without leaving a trace in either run's command, which is the exact
+    # failure this pipeline reports on.
+    if (quantization := overrides.get("quantization")) is not None:
+        data.setdefault("serving", {})["quantization"] = quantization
     return data

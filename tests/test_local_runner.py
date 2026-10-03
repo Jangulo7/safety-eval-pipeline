@@ -361,6 +361,83 @@ def test_server_output_is_captured_not_discarded(config, tmp_path, monkeypatch) 
     assert list((tmp_path / "servers").glob("vllm-*.log")), "no server log was written"
 
 
+def test_the_quantization_override_reaches_the_serve_command(catalog) -> None:
+    """L1 and L3 must differ by one argument on the command line, not by a file edit.
+
+    Changing `serving.quantization` in the config between two runs would move the
+    manipulated variable without either run's command recording it -- the undisclosed
+    condition change this pipeline exists to detect.
+    """
+    from safety_eval.config import RunConfig
+
+    root = Path(__file__).resolve().parents[1]
+    base = RunConfig.load(root / "config" / "eval_config.yaml", catalog)
+    assert "--quantization" not in serve_command(base, "m", 8000), (
+        "the committed config serves at native precision"
+    )
+    fp8 = RunConfig.load(root / "config" / "eval_config.yaml", catalog,
+                         overrides={"quantization": "fp8"})
+    cmd = serve_command(fp8, "m", 8000)
+    assert cmd[cmd.index("--quantization") + 1] == "fp8"
+    # Everything else must be untouched: precision is the only variable that moves.
+    assert serve_command(base, "m", 8000) == \
+        [a for a in cmd if a not in ("--quantization", "fp8")]
+
+
+def test_quantization_none_explicitly_serves_unquantized(catalog) -> None:
+    """`--quantization none` is how L1 and L2 state their precision rather than inherit it."""
+    from safety_eval.config import RunConfig
+
+    root = Path(__file__).resolve().parents[1]
+    cfg = RunConfig.load(root / "config" / "eval_config.yaml", catalog,
+                         overrides={"quantization": "none"})
+    assert "--quantization" not in serve_command(cfg, "m", 8000)
+
+
+def test_the_server_logs_at_the_level_its_provenance_lines_are_written_at(
+        config, tmp_path, monkeypatch) -> None:
+    """The regression that emptied the published baseline's conditions record.
+
+    vLLM reports the resolved engine config and the selected quantization kernel at INFO.
+    Launching the server at WARNING left `query_serving` parsing a log those lines had never
+    reached, so it recorded no `dtype`, `quantization` or `engine_version` at all -- and
+    reported nothing rather than failing, which is the worse of the two. A precision
+    comparison whose record cannot state the precision it served at is void.
+    """
+    monkeypatch.setattr("safety_eval.local_runner.LocalMatrixRunner.fetch",
+                        lambda self, plan, log: make_cache(tmp_path, plan.repo))
+    captured: dict = {}
+
+    def recording_popen(cmd, **kwargs):
+        captured.setdefault("env", kwargs.get("env") or {})
+        return FakeProc(cmd, **kwargs)
+
+    monkeypatch.delenv("VLLM_LOGGING_LEVEL", raising=False)
+    runner = LocalMatrixRunner(config, run_id="run-loglevel", hf_home=tmp_path,
+                               popen=recording_popen, eval_fn=stub_eval)
+    runner.log_dir = tmp_path / "servers"
+    runner.run(log=lambda _: None)
+    assert captured["env"].get("VLLM_LOGGING_LEVEL") == "INFO"
+
+
+def test_an_explicit_log_level_is_still_respected(config, tmp_path, monkeypatch) -> None:
+    """`setdefault`, not an override: a caller debugging vLLM keeps control of its logging."""
+    monkeypatch.setattr("safety_eval.local_runner.LocalMatrixRunner.fetch",
+                        lambda self, plan, log: make_cache(tmp_path, plan.repo))
+    captured: dict = {}
+
+    def recording_popen(cmd, **kwargs):
+        captured.setdefault("env", kwargs.get("env") or {})
+        return FakeProc(cmd, **kwargs)
+
+    monkeypatch.setenv("VLLM_LOGGING_LEVEL", "DEBUG")
+    runner = LocalMatrixRunner(config, run_id="run-loglevel2", hf_home=tmp_path,
+                               popen=recording_popen, eval_fn=stub_eval)
+    runner.log_dir = tmp_path / "servers"
+    runner.run(log=lambda _: None)
+    assert captured["env"].get("VLLM_LOGGING_LEVEL") == "DEBUG"
+
+
 def test_the_serve_command_is_validated_against_the_installed_vllm(config) -> None:
     """vLLM's CLI moves between releases — `--disable-log-requests` was accepted in 0.27
     and removed in 0.28. Validating once up front converts a per-model timeout into an

@@ -203,6 +203,74 @@ class RegisterRow:
     """
 
 
+@dataclass(frozen=True)
+class ServedPrecision:
+    """What the running server reported about the precision it served at.
+
+    Separated out because four register rows depend on it and all four were previously
+    hardcoded to the unquantized case, which made them wrong for exactly the run that
+    changes precision -- the one the comparison exists to measure.
+    """
+
+    quantized: bool
+    bits_per_weight: str
+    group_size_reason: str
+    healing_reason: str
+    calibration_reason: str
+
+
+def served_precision(reported: dict[str, Any]) -> ServedPrecision:
+    """Read the served precision out of the facts the server reported.
+
+    ``dtype`` alone cannot answer this. vLLM quantizes a bf16 checkpoint at load time and
+    goes on reporting ``dtype=torch.bfloat16``, because that remains the compute dtype of the
+    unquantized layers; the weights are 8-bit regardless. Taking the bit width from ``dtype``
+    therefore reports 16 bits for an fp8 run, so it is taken from the quantization scheme
+    instead and only falls back to ``dtype`` when nothing was quantized.
+    """
+    import re
+
+    scheme = str(reported.get("quantization") or "").strip().lower()
+    quantized = bool(scheme) and scheme not in {"none", "null"}
+    if not quantized:
+        dtype = str(reported.get("dtype") or "")
+        return ServedPrecision(
+            quantized=False,
+            bits_per_weight=("16 (bfloat16)" if "bfloat16" in dtype
+                             else "16 (float16)" if "float16" in dtype
+                             else "see dtype"),
+            group_size_reason=("quantization-pipeline field; the model is served at the "
+                               "checkpoint's native precision"),
+            healing_reason="no quantization or pruning, so no healing",
+            calibration_reason="no post-training quantization was performed",
+        )
+
+    # `fp8`, `int8`, `int4`, `w8a8` and the like all carry their weight width in the name.
+    # Anything else is left to `quant_scheme` rather than guessed at.
+    width = re.search(r"(?:fp|int|w|u)(\d+)", scheme)
+    bits = (f"{width.group(1)} (weights, {scheme}); see quant_scheme for the kernel, and "
+            "kv_cache_dtype for the cache, which is quantized separately"
+            if width else f"see quant_scheme ({scheme})")
+    # "Online" in vLLM's method name means the scales are computed from the tensors at load
+    # time rather than fitted to sample data. That is a different claim from "no quantization
+    # happened", and it is the one a reader needs: a scheme with no calibration set cannot
+    # have been calibrated on anything resembling the evaluation data.
+    online = "online" in str(reported.get("quant_method") or "").lower()
+    return ServedPrecision(
+        quantized=True,
+        bits_per_weight=bits,
+        group_size_reason=("scaling is per-tensor under this scheme, so there are no groups"
+                           if "pertensor" in str(reported.get("quant_method") or "").lower()
+                           else f"not reported by the server for {scheme}"),
+        healing_reason=(f"weights were quantized to {scheme} at load time; no healing, "
+                        "fine-tuning or repair step was applied afterwards"),
+        calibration_reason=(
+            f"{scheme} scales are computed from the weights at load time, so no calibration "
+            "dataset was used" if online else
+            f"no calibration dataset was supplied; {scheme} was applied as configured"),
+    )
+
+
 def parameter_register(results: ResultSet, config: RunConfig) -> list[RegisterRow]:
     """The Parameter Register, filled from the run, with inapplicable rows reasoned.
 
@@ -231,18 +299,21 @@ def parameter_register(results: ResultSet, config: RunConfig) -> list[RegisterRo
         if weights.get("param_count_billions") else "checkpoint not measured for this run",
         "recorded" if weights.get("param_count_billions") else "missing",
         provenance="measured" if weights.get("param_count_billions") else "unavailable")
+    reported = (first.serving if first else {}) or {}
+    served = served_precision(reported)
     if local:
-        # Declared, not verified. The pipeline asks vLLM to serve at this precision; it does
-        # not read the precision back from the running server, so a server that ignored the
-        # flag would leave this row unchanged.
-        # Prefer what the server reported about itself over what we asked it for.
-        reported = (first.serving if first else {}) or {}
+        # Prefer what the server reported about itself over what we asked it for. Requesting
+        # a precision does not establish one: vLLM resolves the request against the hardware
+        # and names the kernel it chose, and that name is the only evidence of the arithmetic
+        # that actually ran.
         if reported.get("dtype") or reported.get("quantization"):
+            backend = reported.get("quant_backend")
             add("A · Model identity", "quant_scheme",
-                f"{reported.get('quantization', '?')} (dtype {reported.get('dtype', '?')}), "
-                "reported by the server", provenance="measured")
-            add("A · Model identity", "bits_per_weight",
-                "16 (bfloat16)" if "bfloat16" in reported.get("dtype", "") else "see dtype",
+                f"{reported.get('quantization', '?')} (dtype {reported.get('dtype', '?')})"
+                + (f", kernel {backend} via {reported.get('quant_method', '?')}"
+                   if backend else "")
+                + ", reported by the server", provenance="measured")
+            add("A · Model identity", "bits_per_weight", served.bits_per_weight,
                 provenance="measured")
         else:
             add("A · Model identity", "quant_scheme",
@@ -258,16 +329,41 @@ def parameter_register(results: ResultSet, config: RunConfig) -> list[RegisterRo
     else:
         add("A · Model identity", "quant_scheme", "not disclosed by the router", "undisclosed")
         add("A · Model identity", "bits_per_weight", "unknown", "undisclosed")
+    # Why these rows are inapplicable depends on whether quantization actually ran. Under a
+    # quantized serving they are inapplicable for different reasons, and one of them --
+    # "no post-training quantization was performed" -- would simply be false.
+    #
+    # For a hosted model none of it is knowable: the router does not say what it served, so
+    # claiming native precision, or no quantization pipeline, would assert the thing this
+    # register exists to stop people asserting. Those rows are undisclosed, not inapplicable.
+    if local:
+        group_size_why = served.group_size_reason
+        healing_why = served.healing_reason
+        calibration_why = served.calibration_reason
+    else:
+        group_size_why = healing_why = calibration_why = (
+            "the router does not disclose how the weights were produced, so this cannot be "
+            "stated either way")
     for parameter, why in (
-        ("group_size", "quantization-pipeline field; models are served at native precision"),
-        ("pruning_method", "no pruning applied"),
-        ("sparsity_ratio", "no pruning applied"),
-        ("healing_applied", "no quantization or pruning, so no healing"),
-        ("calibration_dataset", "no post-training quantization was performed"),
+        ("group_size", group_size_why),
+        ("pruning_method", "no pruning applied" if local
+         else "not disclosed by the router"),
+        ("sparsity_ratio", "no pruning applied" if local
+         else "not disclosed by the router"),
+        ("healing_applied", healing_why),
+        ("calibration_dataset", calibration_why),
         ("file_hash_sha256", "no local single-file artifact; the dataset fingerprint is the "
                              "analogous integrity field and is recorded"),
     ):
-        add("A · Model identity", parameter, why, "not applicable", provenance="n/a")
+        # "not applicable" asserts the field has no meaning for this arrangement;
+        # "undisclosed" asserts it has one and nobody reported it. Only the local case can
+        # claim the former, and the difference is the point of carrying a status at all.
+        hosted_unknown = not local and parameter in (
+            "group_size", "pruning_method", "sparsity_ratio", "healing_applied",
+            "calibration_dataset")
+        add("A · Model identity", parameter, why,
+            "undisclosed" if hosted_unknown else "not applicable",
+            provenance="unavailable" if hosted_unknown else "n/a")
 
     # B · inference configuration — per benchmark, because that is where it is held constant
     for task in config.tasks:
