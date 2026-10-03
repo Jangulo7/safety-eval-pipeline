@@ -277,6 +277,11 @@ def parameter_register(results: ResultSet, config: RunConfig) -> list[RegisterRo
         # epochs is an eval-level setting, not a generate-config one; the harness records it
         # separately and reading it back is what makes it measured rather than restated.
         applied.update((cell.eval_config if cell else {}) or {})
+        # The keys this run actually had a protocol for, recorded by the runner at run time.
+        # The catalog is the *current* declaration and drifts: a parameter added to it after
+        # a run would otherwise be rendered as that run's request. An empty set means the
+        # cell predates the field, so the guard is not applied and nothing is claimed.
+        in_force = set((cell.protocol_source if cell else None) or {})
         for key, spec in bench.protocol.items():
             source = "benchmark protocol" if spec.get("source") == "task" else "pipeline choice"
             # Prefer what the harness recorded as applied over what the catalog declared.
@@ -286,6 +291,19 @@ def parameter_register(results: ResultSet, config: RunConfig) -> list[RegisterRo
                 prov = "measured"
                 if applied[key] != spec["value"]:
                     value += f" — DECLARED {spec['value']}, NOT APPLIED"
+            elif in_force and key not in in_force:
+                # The catalog declares it; this run's own protocol record does not list it.
+                # So the parameter was added to the configuration after the run, and saying
+                # "requested" here would attribute to the run a request it never made. This
+                # is a declared-versus-applied divergence inside the reporter itself, so it
+                # is named rather than smoothed over.
+                value = (f"declared {spec['value']} by the current catalog, but this run's "
+                         f"protocol record does not list {key}: the parameter was added "
+                         "after the run and was not sent. The serving default applied and "
+                         "was not reported back.")
+                prov = "unavailable"
+                add("B · Inference", f"{task.key} · {key}", value, "missing", prov)
+                continue
             else:
                 # epochs is applied by the harness itself, so nothing external can drop it.
                 # temperature and max_tokens are sent to a provider and may be ignored.

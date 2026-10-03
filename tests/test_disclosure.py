@@ -275,6 +275,64 @@ def test_a_value_the_server_confirmed_is_marked_measured(results, config) -> Non
     assert "0.28.0" in rows["inference_backend"].value
 
 
+def test_a_parameter_added_after_a_run_is_not_reported_as_that_run_s_request(
+        results, config) -> None:
+    """The defect this guards shipped in `results/published/results.md`.
+
+    `top_p` was added to the catalog after `run-20260830-193016`. Rendering that run's report
+    against the newer catalog printed `strong_reject · top_p | 1.0 (requested, not read back)`
+    -- attributing to the run a request it never made -- while another row in the same table
+    correctly said `top_p` was never set. Two contradictory rows, one of them false.
+
+    The record already distinguishes the two: `protocol_source` is written at run time and
+    lists exactly the keys that run had a protocol for.
+    """
+    for cell in results:
+        cell.applied_generate_config = {"temperature": 0.75, "max_tokens": 2048}
+        cell.protocol_source = {"temperature": "task", "max_tokens": "task",
+                                "epochs": "task"}          # pre-dates top_p
+    rows = {r.parameter: r for r in parameter_register(results, config)}
+    row = rows["strong_reject · top_p"]
+    assert row.status == "missing"
+    assert row.provenance == "unavailable"
+    assert "was not sent" in row.value
+    assert "requested, not read back" not in row.value
+
+
+def test_a_parameter_the_run_did_request_is_still_reported_as_requested(
+        results, config) -> None:
+    """The guard must not swallow the real case: sent to the provider, never confirmed."""
+    for cell in results:
+        cell.applied_generate_config = {"temperature": 0.75, "max_tokens": 2048}
+        cell.protocol_source = {"temperature": "task", "max_tokens": "task",
+                                "epochs": "task", "top_p": "pipeline"}
+    rows = {r.parameter: r for r in parameter_register(results, config)}
+    row = rows["strong_reject · top_p"]
+    assert row.provenance == "requested"
+    assert "requested, not read back" in row.value
+
+
+def test_a_parameter_read_back_from_the_run_is_measured(results, config) -> None:
+    for cell in results:
+        cell.applied_generate_config = {"temperature": 0.75, "max_tokens": 2048, "top_p": 1.0}
+        cell.protocol_source = {"temperature": "task", "max_tokens": "task",
+                                "epochs": "task", "top_p": "pipeline"}
+    rows = {r.parameter: r for r in parameter_register(results, config)}
+    row = rows["strong_reject · top_p"]
+    assert row.provenance == "measured"
+    assert "applied" in row.value
+
+
+def test_a_record_with_no_protocol_source_claims_nothing_either_way(results, config) -> None:
+    """An older record that predates the `protocol_source` field cannot support the guard,
+    so the guard stands down rather than asserting a parameter was dropped."""
+    for cell in results:
+        cell.applied_generate_config = {"temperature": 0.75, "max_tokens": 2048}
+        cell.protocol_source = {}
+    rows = {r.parameter: r for r in parameter_register(results, config)}
+    assert rows["strong_reject · top_p"].provenance == "requested"
+
+
 def test_serving_log_parser_reads_a_real_vllm_startup_line(tmp_path) -> None:
     """Verified against a line captured from vLLM 0.28.0, not against a guess."""
     from safety_eval.local_runner import query_serving
