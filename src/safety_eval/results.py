@@ -131,6 +131,21 @@ class CellResult:
     """The system message actually sent, read back from the log's first sample. ``None``
     means the log shows no system message; it does not mean unknown."""
 
+    served_provider: str | None = None
+    """Which upstream actually answered, read back from the router's own response rather than
+    from the request. ``None`` for a local server, which is its own provider.
+
+    A router resolves one model identifier to whichever upstream it chooses, and those
+    upstreams differ in weights, kernel, precision and chat template. Recording the request
+    alone would describe an intention; this records what served it."""
+
+    served_provider_mix: dict[str, int] | None = None
+    """Every provider that answered, with the number of samples each served.
+
+    Separate from ``served_provider`` because routing is per request, not per run: an
+    unpinned cell can be answered by several upstreams, and a score computed across them is a
+    score of no single system. More than one entry here is a finding, not a detail."""
+
     eval_config: dict[str, Any] = field(default_factory=dict)
     """The run configuration the harness recorded, including epochs and the dataset-order
     seed. Measured, not restated from our own config."""

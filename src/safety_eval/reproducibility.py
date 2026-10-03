@@ -342,4 +342,62 @@ def check_results(results: ResultSet, config: RunConfig) -> Verdict:
                           correction="reconcile config/benchmarks.yaml with the harness; "
                                      "the recorded value is what produced the score")
 
+    _check_routing_took_effect(v, results, config)
     return v
+
+
+def _check_routing_took_effect(v: Verdict, results: ResultSet, config: RunConfig) -> None:
+    """Did the run reach the provider it asked for, and only that one?
+
+    The pre-run gate can only read the configuration, which states an intention. This reads
+    the router's own answer, recorded per sample. Three things can go wrong and each is a
+    different finding:
+
+    * routing was pinned and a *different* upstream answered -- the pin did not take effect,
+      and every score in the cell belongs to a system nobody chose;
+    * one cell was answered by several upstreams, so its score is an average over different
+      weights, kernels and chat templates and is a property of no single system;
+    * nothing was recorded at all, so the question cannot be answered either way.
+    """
+    hosted = [c for c in results
+              if c.status is CellStatus.OK and str(c.provider or "") == "openrouter"]
+    if not hosted:
+        return
+    v.checked.append("served provider")
+    requested = config.raw.get("provider_routing") or {}
+    pinned = [str(s) for s in (requested.get("only") or requested.get("order") or [])]
+
+    for cell in hosted:
+        scope = f"{cell.task_key}/{cell.label}"
+        mix = cell.served_provider_mix or {}
+        if not mix:
+            v.add(id="provider-unrecorded", severity=Severity.WARN, scope=scope,
+                  problem="No serving provider was recorded for this cell, so which upstream "
+                          "produced these scores cannot be established from the record.",
+                  correction="check that the router returns a `provider` field and that the "
+                             "harness retains the raw response")
+            continue
+        if len(mix) > 1:
+            total = sum(mix.values())
+            v.add(id="provider-mixed", severity=Severity.BLOCK, scope=scope,
+                  problem="More than one upstream answered within this single cell, so its "
+                          "score averages over systems that differ in weights, kernel, "
+                          "precision and chat template. It is a score of no one system.",
+                  evidence=", ".join(f"{k} {n}/{total}" for k, n in mix.items())[:300],
+                  correction="pin the provider with `provider_routing: {only: [<slug>], "
+                             "allow_fallbacks: false}` and re-run the cell, or report it as "
+                             "an explicitly unpinned cell rather than as a provider's score")
+        if pinned:
+            served = set(mix)
+            unexpected = {s for s in served
+                          if not any(p.lower() in s.lower() or s.lower() in p.lower()
+                                     for p in pinned)}
+            if unexpected:
+                v.add(id="provider-not-applied", severity=Severity.BLOCK, scope=scope,
+                      problem="Routing was pinned, but the request was answered by an "
+                              "upstream that was not the one asked for. The pin was "
+                              "requested and not applied.",
+                      evidence=f"requested {pinned}; served {sorted(served)}",
+                      correction="confirm the slug is spelled as the router spells it and "
+                                 "that fallbacks are disabled; a pin that silently falls "
+                                 "back is worse than no pin, because the report claims one")

@@ -240,6 +240,18 @@ class Runner:
 
         return cell
 
+    def _routing(self, plan: CellPlan) -> dict[str, Any] | None:
+        """The router-pinning object for this cell, or None where it does not apply.
+
+        Passed through verbatim rather than rebuilt, so the configuration says exactly what
+        reaches the router. Only meaningful for a routed provider: a locally served model has
+        one upstream, itself.
+        """
+        if plan.model.provider != "openrouter":
+            return None
+        routing = self.config.raw.get("provider_routing") or None
+        return dict(routing) if routing else None
+
     def _invoke(self, plan: CellPlan) -> Any:
         """Call the Inspect harness for one cell."""
         eval_fn = self._eval_fn
@@ -253,6 +265,15 @@ class Runner:
             tasks=plan.benchmark.task,
             task_args=plan.task_args,
             model=plan.model.id,
+            # Routing, actually sent rather than merely configured.
+            #
+            # `provider_routing` existed in the configuration and was read by the
+            # reproducibility gate, which blocked a run that did not set it -- but nothing
+            # ever passed it to the router. The gate therefore certified an intention and
+            # called it a condition, while the router went on choosing an upstream per
+            # request. Inspect's OpenRouter provider forwards a `provider` model argument
+            # into the request body, so that is where it now goes, verbatim.
+            **({"model_args": {"provider": routing}} if (routing := self._routing(plan)) else {}),
             limit=plan.limit,
             # The benchmark's own generation protocol, identical for every model evaluated
             # on it. Flattening these to one run-wide number would either break
@@ -392,6 +413,26 @@ class Runner:
         if revision is not None:
             cell.run_commit = getattr(revision, "commit", None)
             cell.run_commit_dirty = getattr(revision, "dirty", None)
+
+        # Who actually served the request, counted across every sample.
+        #
+        # This is the hosted analogue of reading the quantization kernel back out of a local
+        # server: the model identifier is a request, and the router decides what answers it.
+        # It is counted per sample rather than taken from the first, because routing happens
+        # per request -- an unpinned cell can be spread across several upstreams, and a score
+        # averaged over them belongs to no single system. Absent for a local server, which is
+        # its own provider.
+        mix: dict[str, int] = {}
+        for sample in (getattr(eval_log, "samples", None) or []):
+            for event in (getattr(sample, "events", None) or []):
+                call = getattr(event, "call", None)
+                response = getattr(call, "response", None) if call else None
+                if isinstance(response, dict) and response.get("provider"):
+                    name = str(response["provider"])
+                    mix[name] = mix.get(name, 0) + 1
+        if mix:
+            cell.served_provider_mix = dict(sorted(mix.items(), key=lambda kv: -kv[1]))
+            cell.served_provider = next(iter(cell.served_provider_mix))
 
         # The system message actually sent, not the one the task is believed to set.
         for sample in (getattr(eval_log, "samples", None) or [])[:1]:

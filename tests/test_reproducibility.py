@@ -256,3 +256,90 @@ def test_render_says_the_run_was_not_started(catalog, tmp_path) -> None:
                                 defaults={"sample_shuffle": None})).render()
     assert "was NOT started" in text
     assert "BLOCKED" in text
+
+
+# ------------------------------------------------------- routing: requested versus served
+
+def _hosted(results, **kw):
+    """Turn a fixture result set into hosted cells carrying serving provenance."""
+    for cell in results:
+        cell.provider = "openrouter"
+        for key, value in kw.items():
+            setattr(cell, key, value)
+    return results
+
+
+def test_a_pin_that_did_not_take_effect_is_a_blocker(results, config, catalog, tmp_path):
+    """The failure the pre-run gate cannot see.
+
+    Pinning is a request. The router can answer from somewhere else, and nothing in the
+    response says "this is not what you asked for". A report that names the pinned provider
+    would then be describing a system that never ran.
+    """
+    import yaml
+
+    from safety_eval.config import RunConfig
+    from safety_eval.reproducibility import check_results
+
+    data = yaml.safe_load((ROOT / "config" / "eval_config.yaml").read_text())
+    data["provider_routing"] = {"only": ["Together"], "allow_fallbacks": False}
+    path = tmp_path / "pinned.yaml"
+    path.write_text(yaml.safe_dump(data))
+
+    v = check_results(_hosted(results, served_provider="Novita",
+                              served_provider_mix={"Novita": 250}),
+                      RunConfig.load(path, catalog))
+    ids = {i.id for i in v.blockers}
+    assert "provider-not-applied" in ids
+    assert any("requested ['Together']" in i.evidence for i in v.blockers)
+
+
+def test_a_pin_that_held_passes(results, config, catalog, tmp_path):
+    import yaml
+
+    from safety_eval.config import RunConfig
+    from safety_eval.reproducibility import check_results
+
+    data = yaml.safe_load((ROOT / "config" / "eval_config.yaml").read_text())
+    data["provider_routing"] = {"only": ["Novita"], "allow_fallbacks": False}
+    path = tmp_path / "pinned.yaml"
+    path.write_text(yaml.safe_dump(data))
+
+    v = check_results(_hosted(results, served_provider="Novita",
+                              served_provider_mix={"Novita": 250}),
+                      RunConfig.load(path, catalog))
+    assert "provider-not-applied" not in {i.id for i in v.blockers}
+
+
+def test_one_cell_served_by_several_upstreams_is_a_blocker(results, config):
+    """A score averaged over upstreams is a property of no single system.
+
+    Routing happens per request, so an unpinned cell can be spread across providers that
+    differ in weights, kernel, precision and chat template. The aggregate looks perfectly
+    ordinary, which is exactly why it has to be caught here.
+    """
+    from safety_eval.reproducibility import check_results
+
+    v = check_results(_hosted(results, served_provider="Novita",
+                              served_provider_mix={"Novita": 180, "Together": 70}), config)
+    blocked = [i for i in v.blockers if i.id == "provider-mixed"]
+    assert blocked, "a cell answered by two providers must not pass"
+    assert "Novita 180/250" in blocked[0].evidence
+
+
+def test_an_unrecorded_provider_warns_rather_than_passing_silently(results, config):
+    from safety_eval.reproducibility import check_results
+
+    v = check_results(_hosted(results, served_provider=None, served_provider_mix=None), config)
+    assert "provider-unrecorded" in {i.id for i in v.warnings}
+
+
+def test_local_runs_are_not_asked_which_provider_served_them(results, config):
+    """A locally served model is its own upstream, so the question does not apply."""
+    from safety_eval.reproducibility import check_results
+
+    for cell in results:
+        cell.provider = "vllm"
+    v = check_results(results, config)
+    assert "served provider" not in v.checked
+    assert not any(i.id.startswith("provider-") for i in v.issues)
