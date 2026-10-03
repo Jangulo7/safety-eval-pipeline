@@ -499,4 +499,8 @@ def _apply_overrides(data: dict[str, Any], overrides: dict[str, Any]) -> dict[st
     # failure this pipeline reports on.
     if (quantization := overrides.get("quantization")) is not None:
         data.setdefault("serving", {})["quantization"] = quantization
+    # Agentic benchmarks need the server to parse tool calls; text benchmarks do not and must
+    # not acquire the flags by accident, since they are a serving condition like any other.
+    if (tool_calling := overrides.get("tool_calling")) is not None:
+        data.setdefault("serving", {})["tool_calling"] = tool_calling
     return data

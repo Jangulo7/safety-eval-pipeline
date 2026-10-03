@@ -30,7 +30,7 @@ from datetime import UTC
 from pathlib import Path
 from typing import Any
 
-from .config import ModelSpec, RunConfig
+from .config import ConfigError, ModelSpec, RunConfig
 from .results import CellResult, ResultSet, RunMetadata, link_latest, new_run_id
 from .runner import Runner, harness_versions
 
@@ -166,6 +166,14 @@ def query_serving(base_url: str, api_key: str, log_path: Path | None) -> dict[st
             m = re.search(pattern, text)
             if m:
                 facts[key] = m.group(1)
+        # Requested versus applied, again: the tool-call flags are a request, and this is the
+        # server reporting what it resolved them to. An agentic run whose record cannot show
+        # tool parsing was on cannot tell a model that refused from one that was never able
+        # to act at all -- and those score identically.
+        if re.search(r"enable_auto_tool_choice['\"]?\s*[:=]\s*True", text):
+            facts["tool_calling"] = "enabled"
+            if m := re.search(r"tool_call_parser['\"]?\s*[:=]\s*['\"](\w+)['\"]", text):
+                facts["tool_call_parser"] = m.group(1)
         # vLLM logs the resolved kernel once per quantized linear method, e.g.
         # "Selected CutlassFP8ScaledMMLinearKernel for Fp8PerTensorOnlineLinearMethod".
         # Absent for an unquantized model, which is itself the correct reading.
@@ -265,7 +273,104 @@ def serve_command(config: RunConfig, repo: str, port: int) -> list[str]:
         # Applied at load time to the same bf16 checkpoint, so a precision comparison
         # changes exactly one variable and nothing else.
         cmd += ["--quantization", str(quantization)]
+    if serving.get("tool_calling"):
+        cmd += ["--enable-auto-tool-choice",
+                "--tool-call-parser", tool_call_parser(config, repo)]
     return cmd
+
+
+def tool_call_parser(config: RunConfig, repo: str) -> str:
+    """Which of vLLM's tool-call parsers this model's output needs.
+
+    Agentic benchmarks score what the model *did*, so they need its tool calls as structured
+    calls rather than as prose. vLLM only produces those if it is told at startup which
+    format to expect, and the format is per model family, not per server: verified from the
+    three models' own chat templates, Llama-3.1 emits JSON objects, Qwen2.5 wraps calls in
+    `<tool_call>` and Ministral uses `[TOOL_CALLS]`.
+
+    An unknown family raises rather than serving without a parser. Measured on vLLM 0.28.0,
+    serving with no tool flags gives an immediate HTTP 400, which is survivable -- but the
+    near miss is not: a *wrong* parser is accepted silently. Llama served with `hermes` emits
+    a perfect call, hermes does not recognise the format, and it comes back as plain content
+    with no error. Guessing a parser is therefore worse than refusing to, and
+    `verify_tool_calling` checks the running server for exactly that case.
+    """
+    serving = config.raw.get("serving") or {}
+    parsers = serving.get("tool_call_parsers") or {}
+    family = next((m.family for m in config.models
+                   if m.id.split("/", 1)[-1] == repo or m.id.endswith(repo)), None)
+    if family is None:
+        raise ConfigError(
+            f"serving.tool_calling is on, but {repo!r} matches no model in the config, so its "
+            "tool-call format cannot be determined")
+    parser = parsers.get(family)
+    if not parser:
+        raise ConfigError(
+            f"serving.tool_calling is on, but no tool-call parser is configured for model "
+            f"family {family!r}. Add it under `serving.tool_call_parsers`; vLLM's parser must "
+            "match the format the model emits, and guessing produces an agent that silently "
+            "never calls a tool.")
+    return str(parser)
+
+
+PROBE_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "send_email",
+        "description": "Send an email to a recipient.",
+        "parameters": {
+            "type": "object",
+            "properties": {"to": {"type": "string"}, "subject": {"type": "string"}},
+            "required": ["to", "subject"],
+        },
+    },
+}
+
+
+def verify_tool_calling(base_url: str, api_key: str, model: str,
+                        log: Callable[[str], None]) -> None:
+    """Prove the served model's tool calls come back parsed, before spending a run on it.
+
+    Measured against vLLM 0.28.0, the three ways this can be wrong are not equally loud:
+
+    * no tool flags at all -> HTTP 400, the request is rejected outright;
+    * a parser that needs a token the tokenizer lacks (`mistral` on Llama) -> hard error;
+    * **a wrong but generic parser (`hermes` on Llama) -> silence.** The model emits a
+      perfect call, the parser does not recognise the format, and it is returned as ordinary
+      content with `finish_reason: stop` and no error anywhere.
+
+    The third case is the dangerous one and no amount of configuration checking catches it,
+    because the configuration is syntactically fine. Only asking the running server for a tool
+    call and looking at what comes back does. One request, a few seconds, against an agentic
+    run that otherwise produces a smooth curve of zeros over GPU-days.
+    """
+    import requests
+
+    try:
+        r = requests.post(
+            f"{base_url.rstrip('/')}/chat/completions",
+            headers={"Authorization": f"Bearer {api_key}"},
+            json={"model": model, "temperature": 0, "max_tokens": 128,
+                  "messages": [{"role": "user",
+                                "content": "Email alice@example.com with the subject Invoice."}],
+                  "tools": [PROBE_TOOL]},
+            timeout=180)
+    except Exception as exc:
+        raise ServerError(f"tool-calling probe could not reach the server: {exc}") from exc
+
+    if r.status_code != 200:
+        raise ServerError(
+            f"tool-calling probe was rejected ({r.status_code}): {r.text[:300]}. The server "
+            "is not configured to parse tool calls, so an agentic benchmark cannot run.")
+    choice = (r.json().get("choices") or [{}])[0]
+    if not (choice.get("message") or {}).get("tool_calls"):
+        content = ((choice.get("message") or {}).get("content") or "")[:200]
+        raise ServerError(
+            "the server accepted a tool request but returned no parsed tool call. The "
+            "configured tool-call parser does not match the format this model emits, so every "
+            "agentic task would score as not-completed with no error raised. The model "
+            f"returned as plain content: {content!r}")
+    log("    tool calling verified: the server returns parsed tool calls")
 
 
 def validate_serve_command(config: RunConfig, log: Callable[[str], None]) -> None:
@@ -274,8 +379,13 @@ def validate_serve_command(config: RunConfig, log: Callable[[str], None]) -> Non
     vLLM's CLI moves between releases — `--disable-log-requests` was accepted in 0.27 and
     removed in 0.28. An unrecognised flag kills the server instantly, so validating once up
     front converts a per-model timeout into an immediate, readable error.
+
+    Built for the first configured model rather than for a placeholder, because some flags
+    now depend on which model is being served: the tool-call parser is chosen per model
+    family, and a placeholder repo belongs to no family.
     """
-    cmd = serve_command(config, "__validate__", 0)
+    repo = config.models[0].id.split("/", 1)[-1]
+    cmd = serve_command(config, repo, 0)
     flags = {a for a in cmd if a.startswith("--")}
     try:
         helped = subprocess.run([cmd[0], "-m", "vllm.entrypoints.openai.api_server",
@@ -413,6 +523,17 @@ class LocalMatrixRunner:
             raise
         log(f"    server ready, serving: {', '.join(served)}")
         self.serving_facts = query_serving(self.base_url, self.api_key, log_path)
+        if (self.config.raw.get("serving") or {}).get("tool_calling"):
+            # Before the cells, not after: a parser that does not match this model returns
+            # every tool call as prose without erroring, and the run would complete normally
+            # with every agentic task scored as not-completed.
+            try:
+                verify_tool_calling(self.base_url, self.api_key, plan.model.id.split("/", 1)[-1],
+                                    log)
+            except ServerError:
+                self.stop_server(proc, log)
+                log(f"    server log: {log_path}")
+                raise
         return proc
 
     def stop_server(self, proc: Any, log: Callable[[str], None]) -> None:

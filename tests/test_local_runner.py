@@ -394,6 +394,162 @@ def test_quantization_none_explicitly_serves_unquantized(catalog) -> None:
     assert "--quantization" not in serve_command(cfg, "m", 8000)
 
 
+def test_tool_calling_is_off_unless_asked_for(config) -> None:
+    """The text benchmarks must not silently acquire two extra serve flags.
+
+    The serve command is a serving condition, and the four cells of the precision block are
+    registered verbatim. Tool parsing is only needed by agentic benchmarks, so it is opt-in.
+    """
+    cmd = serve_command(config, "meta-llama/Llama-3.1-8B-Instruct", 8000)
+    assert "--enable-auto-tool-choice" not in cmd
+    assert "--tool-call-parser" not in cmd
+
+
+def test_each_model_family_gets_the_parser_its_own_template_implies(catalog) -> None:
+    """Three families, three formats, verified from the models' own chat templates:
+    Llama-3.1 emits JSON objects, Qwen2.5 wraps calls in `<tool_call>` (the Hermes format),
+    Ministral uses `[TOOL_CALLS]`. One blanket parser would silence two of the three."""
+    from safety_eval.config import RunConfig
+
+    root = Path(__file__).resolve().parents[1]
+    cfg = RunConfig.load(root / "config" / "eval_config.yaml", catalog,
+                         overrides={"tool_calling": True})
+    expected = {
+        "meta-llama/Llama-3.1-8B-Instruct": "llama3_json",
+        "Qwen/Qwen2.5-7B-Instruct": "hermes",
+        "mistralai/Ministral-8B-Instruct-2410": "mistral",
+    }
+    for repo, parser in expected.items():
+        cmd = serve_command(cfg, repo, 8000)
+        assert "--enable-auto-tool-choice" in cmd
+        assert cmd[cmd.index("--tool-call-parser") + 1] == parser, repo
+
+
+def test_an_unknown_family_fails_loudly_rather_than_serving_without_a_parser(
+        catalog, tmp_path) -> None:
+    """Why an unknown family must raise rather than fall back to some default parser.
+
+    Measured on vLLM 0.28.0: serving with no tool flags returns HTTP 400, so that mistake is
+    loud. A *wrong* parser is not. Llama served with `hermes` emitted
+    `<|python_tag|>{"name": "send_email", ...}`, hermes did not recognise the format, and it
+    came back as plain content with `finish_reason: stop` and no error -- an agent that never
+    acts, every task scored not-completed, a smooth curve of zeros over GPU-days. So a parser
+    is never guessed, and `verify_tool_calling` probes the live server as well.
+    """
+    import yaml
+
+    from safety_eval.config import ConfigError, RunConfig
+
+    root = Path(__file__).resolve().parents[1]
+    data = yaml.safe_load((root / "config" / "eval_config.yaml").read_text())
+    data["serving"]["tool_calling"] = True
+    data["serving"]["tool_call_parsers"] = {"llama": "llama3_json"}   # qwen, mistral missing
+    path = tmp_path / "partial.yaml"
+    path.write_text(yaml.safe_dump(data))
+    cfg = RunConfig.load(path, catalog)
+
+    assert "--tool-call-parser" in serve_command(cfg, "meta-llama/Llama-3.1-8B-Instruct", 8000)
+    with pytest.raises(ConfigError, match="no tool-call parser is configured"):
+        serve_command(cfg, "Qwen/Qwen2.5-7B-Instruct", 8000)
+
+
+def test_a_model_absent_from_the_config_cannot_have_its_format_guessed(catalog) -> None:
+    from safety_eval.config import ConfigError, RunConfig
+
+    root = Path(__file__).resolve().parents[1]
+    cfg = RunConfig.load(root / "config" / "eval_config.yaml", catalog,
+                         overrides={"tool_calling": True})
+    with pytest.raises(ConfigError, match="matches no model in the config"):
+        serve_command(cfg, "some-org/Unknown-7B", 8000)
+
+
+def test_tool_calling_changes_nothing_else_about_the_serve_command(catalog) -> None:
+    """Enabling it adds exactly two flags and moves no other condition."""
+    from safety_eval.config import RunConfig
+
+    root = Path(__file__).resolve().parents[1]
+    repo = "meta-llama/Llama-3.1-8B-Instruct"
+    base = serve_command(RunConfig.load(root / "config" / "eval_config.yaml", catalog), repo, 8000)
+    on = serve_command(RunConfig.load(root / "config" / "eval_config.yaml", catalog,
+                                      overrides={"tool_calling": True}), repo, 8000)
+    assert [a for a in on if a not in ("--enable-auto-tool-choice", "--tool-call-parser",
+                                       "llama3_json")] == base
+
+
+def test_the_probe_rejects_a_server_that_returns_the_call_as_prose(monkeypatch) -> None:
+    """The silent case, reproduced from a real response.
+
+    Llama served with the `hermes` parser returned exactly this: the call emitted correctly,
+    the parser blind to the format, `finish_reason: stop`, and no error anywhere. Nothing
+    downstream can tell it apart from a model that declined to act.
+    """
+    from safety_eval.local_runner import ServerError, verify_tool_calling
+
+    class Resp:
+        status_code = 200
+        text = ""
+
+        @staticmethod
+        def json():
+            return {"choices": [{"finish_reason": "stop", "message": {
+                "content": '<|python_tag|>{"name": "send_email", "parameters": {}}',
+                "tool_calls": None}}]}
+
+    monkeypatch.setattr("requests.post", lambda *a, **k: Resp())
+    with pytest.raises(ServerError, match="no parsed tool call"):
+        verify_tool_calling("http://x/v1", "k", "m", lambda _: None)
+
+
+def test_the_probe_reports_an_outright_rejection(monkeypatch) -> None:
+    """Serving with no tool flags at all returns HTTP 400 on vLLM 0.28."""
+    from safety_eval.local_runner import ServerError, verify_tool_calling
+
+    class Resp:
+        status_code = 400
+        text = '"auto" tool choice requires --enable-auto-tool-choice'
+
+        @staticmethod
+        def json():
+            return {}
+
+    monkeypatch.setattr("requests.post", lambda *a, **k: Resp())
+    with pytest.raises(ServerError, match="rejected"):
+        verify_tool_calling("http://x/v1", "k", "m", lambda _: None)
+
+
+def test_the_probe_passes_when_a_call_comes_back_parsed(monkeypatch) -> None:
+    from safety_eval.local_runner import verify_tool_calling
+
+    class Resp:
+        status_code = 200
+        text = ""
+
+        @staticmethod
+        def json():
+            return {"choices": [{"finish_reason": "tool_calls", "message": {
+                "content": None,
+                "tool_calls": [{"function": {"name": "send_email", "arguments": "{}"}}]}}]}
+
+    monkeypatch.setattr("requests.post", lambda *a, **k: Resp())
+    said: list[str] = []
+    verify_tool_calling("http://x/v1", "k", "m", said.append)
+    assert any("verified" in s for s in said)
+
+
+def test_the_probe_only_runs_when_tool_calling_is_on(config, tmp_path, monkeypatch) -> None:
+    """A text-benchmark run must not pay for, or fail on, a tool probe."""
+    monkeypatch.setattr("safety_eval.local_runner.LocalMatrixRunner.fetch",
+                        lambda self, plan, log: make_cache(tmp_path, plan.repo))
+    called: list[int] = []
+    monkeypatch.setattr("safety_eval.local_runner.verify_tool_calling",
+                        lambda *a, **k: called.append(1))
+    runner = LocalMatrixRunner(config, run_id="run-noprobe", hf_home=tmp_path,
+                               popen=FakeProc, eval_fn=stub_eval)
+    runner.log_dir = tmp_path / "servers"
+    runner.run(log=lambda _: None)
+    assert called == [], "the probe ran for a run that serves no tools"
+
+
 def test_the_server_logs_at_the_level_its_provenance_lines_are_written_at(
         config, tmp_path, monkeypatch) -> None:
     """The regression that emptied the published baseline's conditions record.

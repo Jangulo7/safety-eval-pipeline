@@ -48,6 +48,7 @@ def _config(args: argparse.Namespace):
         "html": _tri(None, getattr(args, "no_html", False)),
         "pdf": _tri(None, getattr(args, "no_pdf", False)),
         "quantization": getattr(args, "quantization", None),
+        "tool_calling": (True if getattr(args, "tool_calling", False) else None),
     }
     return RunConfig.load(args.config, Catalog.load(args.catalog), overrides=overrides)
 
@@ -411,6 +412,13 @@ def build_parser() -> argparse.ArgumentParser:
                          "the hardware, and the kernel it actually selects is recorded as the "
                          "measured precision. Use this rather than editing the config between "
                          "runs, so each run's command states its own conditions.")
+    rl.add_argument("--tool-calling", action="store_true", dest="tool_calling",
+                    help="serve with vLLM's tool-call parsing on, which agentic "
+                         "benchmarks require: they score what the model did, so a "
+                         "tool call must come back as a call and not as text. The "
+                         "server is probed for a parsed call before any cell runs. "
+                         "Off by default because it changes the serve command, and "
+                         "the text benchmarks neither need it nor should acquire it.")
     rl.add_argument("--skip-doctor", action="store_true")
     rl.add_argument("--offline", action="store_true")
     rl.add_argument("--allow-irreproducible", action="store_true")

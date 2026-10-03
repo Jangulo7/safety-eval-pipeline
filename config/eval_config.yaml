@@ -23,6 +23,23 @@ serving:
   gpu_memory_utilization: 0.85
   served_one_at_a_time: true  # 3 x ~16GB bf16 does not co-reside in 32GB VRAM
 
+  # Off by default, and deliberately so: it adds two flags to the serve command, which is a
+  # serving condition, and the text benchmarks neither need it nor should silently acquire
+  # it. Agentic benchmarks DO need it -- they score what the model did, so a tool call has to
+  # come back as a call and not as prose. Turn it on per run with `--tool-calling`.
+  tool_calling: false
+
+  # vLLM parses tool calls per model family, because each family emits a different format.
+  # Verified from each model's own chat template rather than from documentation:
+  # Llama-3.1 emits JSON objects, Qwen2.5 wraps calls in `<tool_call>`, Ministral uses
+  # `[TOOL_CALLS]`. A family missing from this map is an error, never a guess: measured on
+  # vLLM 0.28, a *wrong* parser is accepted without complaint and returns every tool call as
+  # prose, so an agentic run completes normally with every task scored not-completed.
+  tool_call_parsers:
+    llama: llama3_json
+    qwen: hermes
+    mistral: mistral
+
 models:
   - id: vllm/Qwen/Qwen2.5-7B-Instruct
     family: qwen
