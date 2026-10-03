@@ -243,3 +243,92 @@ def test_the_adapter_does_not_import_the_pipeline_beside_it() -> None:
     for py in src.glob("*.py"):
         text = py.read_text()
         assert "safety_eval" not in text, f"{py.name} imports the pipeline"
+
+
+# ------------------------------------------------------------- Every Eval Ever interop
+
+def test_the_emitted_record_passes_the_real_eee_validator() -> None:
+    """S4: validated by Every Eval Ever's own model, not by a copy of its schema.
+
+    Using the installed package means this test fails if the upstream schema moves, which is
+    the only honest way to claim compatibility with it.
+    """
+    from rcr_core.eee import to_eee_dict, validate
+
+    rec = from_eval_log(_log())
+    payload = to_eee_dict(rec, evaluation_name="demo", score=0.5, metric_name="accuracy",
+                          lower_is_better=False, source_organization="test")
+    model = validate(payload)
+    assert model.schema_version == "0.3.0"
+    assert model.eval_library.name == "inspect_ai"
+
+
+def test_the_message_budget_uses_eees_own_field_rather_than_a_side_channel() -> None:
+    """EEE already has `eval_limits.message_limit`. Duplicating it into free text would make
+    the record harder to pool, not easier."""
+    from rcr_core.eee import to_eee_dict, validate
+
+    model = validate(to_eee_dict(from_eval_log(_log()), evaluation_name="demo", score=0.5,
+                                 metric_name="accuracy", lower_is_better=False,
+                                 source_organization="test"))
+    limits = model.evaluation_results[0].generation_config.generation_args.eval_limits
+    assert limits.message_limit == 20
+
+
+def test_provenance_survives_the_conversion_because_eee_cannot_hold_it() -> None:
+    """The whole reason both formats are emitted.
+
+    EEE v0.3.0 has no provenance field anywhere and `GenerationArgs` forbids extra keys, so a
+    pooled record would otherwise lose the distinction between a condition that was
+    established and one that was only requested. The marks travel in the one free string map,
+    labelled as a side channel rather than passed off as schema support.
+    """
+    from rcr_core.eee import to_eee_dict, validate
+
+    model = validate(to_eee_dict(from_eval_log(_log()), evaluation_name="demo", score=0.5,
+                                 metric_name="accuracy", lower_is_better=False,
+                                 source_organization="test"))
+    extra = model.source_metadata.additional_details
+    assert extra["rcr_tier"] in {"0", "1", "2", "3"}
+    assert "model_provider_requested" in extra["rcr_requested_unverified_fields"]
+    assert "no provenance field" in extra["rcr_note"]
+
+
+def test_eee_v0_3_0_really_has_no_provenance_field() -> None:
+    """The claim the previous test rests on, checked against the installed schema rather than
+    asserted. If EEE ever gains one, this fails and the side channel should be retired."""
+    from pathlib import Path
+
+    import every_eval_ever.eval_types as types
+
+    source = Path(types.__file__).read_text().lower()
+    for term in ("provenance", "was_applied", "verified_applied"):
+        assert term not in source, f"EEE now has {term!r}; stop using the side channel"
+
+
+def test_a_score_direction_must_be_stated_not_guessed() -> None:
+    """EEE requires `lower_is_better` and gives it no default. Inferring it from a metric's
+    name would be exactly the kind of guess this project objects to, so it is a parameter."""
+    from rcr_core.eee import to_eee_dict, validate
+
+    for lower in (True, False):
+        model = validate(to_eee_dict(from_eval_log(_log()), evaluation_name="d", score=0.1,
+                                     metric_name="refusal_rate", lower_is_better=lower,
+                                     source_organization="test"))
+        assert model.evaluation_results[0].metric_config.lower_is_better is lower
+
+
+def test_an_unidentified_dataset_is_declared_rather_than_invented() -> None:
+    from rcr_core.eee import to_eee_dict, validate
+
+    bare = SimpleNamespace(eval=SimpleNamespace(), status=None, location="", results=None,
+                           samples=None)
+    model = validate(to_eee_dict(from_eval_log(bare), evaluation_name="d", score=0.0,
+                                 metric_name="m", lower_is_better=False,
+                                 source_organization="test"))
+    src = model.evaluation_results[0].source_data
+    assert src.source_type == "other"
+    assert src.dataset_name == "unidentified"
+    # The reason survives: a consumer that sees only "unidentified" cannot tell a private
+    # dataset from a log that failed to record one.
+    assert "identifies no dataset" in src.additional_details["rcr_reason"]
