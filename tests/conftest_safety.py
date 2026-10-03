@@ -8,6 +8,7 @@ that the harness swap did not have to touch the original file. Both are imported
 from __future__ import annotations
 
 import sys
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -27,8 +28,22 @@ def catalog() -> Catalog:
 
 
 @pytest.fixture()
-def config(catalog: Catalog) -> RunConfig:
-    return RunConfig.load(ROOT / "config" / "eval_config.yaml", catalog)
+def config(catalog: Catalog, tmp_path: Path) -> RunConfig:
+    """The real run configuration, but writing into a scratch directory.
+
+    The config under test is the committed one -- a fixture that invented its own models and
+    tasks would stop catching configuration mistakes, which is half of what these tests are
+    for. Its output paths, however, are the live ``results/`` and ``logs/`` directories, and
+    the tests that exercise the serving sequence call the real ``start_server``. Left
+    unredirected, ``pytest`` writes stub result sets into ``results/run-*``, repoints
+    ``results/latest`` at one of them, and truncates the vLLM server logs that
+    ``query_serving`` later reads back as provenance. Published run artefacts are not test
+    scratch space, so only the destinations are overridden.
+    """
+    config = RunConfig.load(ROOT / "config" / "eval_config.yaml", catalog)
+    config.output = replace(config.output,
+                            results_dir=tmp_path / "results", log_dir=tmp_path / "logs")
+    return config
 
 
 @pytest.fixture()

@@ -53,3 +53,9 @@ logs/
 # Run outputs (regenerable from results.json); committed results live in results/published/
 results/*/
 !results/published/
+
+# `results/latest` is a pointer `link_latest()` rewrites on every run, not an artefact.
+# `results/*/` above does not cover it: that pattern matches directories, and `latest` is a
+# symlink, so it was committed once already -- pointing at a run that is gitignored, which
+# left every fresh clone with a dangling link.
+results/latest
