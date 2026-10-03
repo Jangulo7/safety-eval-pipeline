@@ -611,3 +611,43 @@ def test_an_unknown_flag_is_rejected_before_any_model_is_served(config, monkeypa
                         lambda *a, **k: ["python", "--definitely-not-a-flag"])
     with pytest.raises(ServerError, match="does not accept"):
         validate_serve_command(config, lambda _: None)
+
+
+def test_an_agentic_run_in_which_nothing_was_called_is_refused() -> None:
+    """The guard a pre-run probe cannot be.
+
+    Measured on vLLM 0.28: Llama-3.1 answers a simple tool request with
+    `<|python_tag|>{...}`, which `llama3_json` parses, and answers AgentHarm's framing with
+    `<function=name>{...}</function>`, which no vLLM parser handles. The probe passes, every
+    rollout comes back as three messages of prose, every task scores zero, and nothing errors.
+    The format is a property of the prompt as well as the model, so no probe anticipates it.
+    """
+    from types import SimpleNamespace
+
+    from safety_eval.local_runner import ServerError, assert_agent_acted
+
+    silent = SimpleNamespace(samples=[
+        SimpleNamespace(messages=[SimpleNamespace(tool_calls=None)]) for _ in range(176)])
+    with pytest.raises(ServerError, match="never acted"):
+        assert_agent_acted(silent)
+
+
+def test_an_agentic_run_that_called_tools_passes() -> None:
+    from types import SimpleNamespace
+
+    from safety_eval.local_runner import assert_agent_acted
+
+    acted = SimpleNamespace(samples=[
+        SimpleNamespace(messages=[SimpleNamespace(tool_calls=[{"f": 1}])]),
+        SimpleNamespace(messages=[SimpleNamespace(tool_calls=None)]),
+    ])
+    assert_agent_acted(acted)
+
+
+def test_a_non_agentic_run_is_not_asked_whether_it_called_tools() -> None:
+    """The text benchmarks call no tools by design, so an empty log is not a failure."""
+    from types import SimpleNamespace
+
+    from safety_eval.local_runner import assert_agent_acted
+
+    assert_agent_acted(SimpleNamespace(samples=[]))
