@@ -422,9 +422,18 @@ class Runner:
         # per request -- an unpinned cell can be spread across several upstreams, and a score
         # averaged over them belongs to no single system. Absent for a local server, which is
         # its own provider.
+        # Only the model under test. A judged benchmark calls two models per sample -- the
+        # subject and the grader -- and both come back through the same router carrying a
+        # `provider` field. Counting every model event therefore reported the grader's
+        # upstream as a second provider serving the cell, which made every hosted cell look
+        # like it had been split across two providers. The grader's serving stack is a
+        # condition of the run, but it is not the condition this field is about.
+        subject = str(plan.model.id)
         mix: dict[str, int] = {}
         for sample in (getattr(eval_log, "samples", None) or []):
             for event in (getattr(sample, "events", None) or []):
+                if str(getattr(event, "model", "")) != subject:
+                    continue
                 call = getattr(event, "call", None)
                 response = getattr(call, "response", None) if call else None
                 if isinstance(response, dict) and response.get("provider"):

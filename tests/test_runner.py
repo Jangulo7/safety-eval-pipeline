@@ -253,3 +253,38 @@ def test_a_full_dataset_cell_records_the_dataset_size_not_zero(config, catalog) 
             assert cell.n_requested == expected, f"{cell.task_key} recorded {cell.n_requested}"
     finally:
         path.unlink(missing_ok=True)
+
+
+def test_the_graders_upstream_is_not_counted_as_serving_the_cell() -> None:
+    """A judged benchmark calls two models per sample, and both come back through the router.
+
+    Counting every model event reported the grader's upstream as a second provider serving the
+    cell, so every hosted cell looked split across two providers and the served-provider check
+    blocked it. The grader's serving stack is a condition of the run, but it is not the
+    condition this field is about.
+    """
+    from types import SimpleNamespace
+
+    from safety_eval.runner import Runner
+
+    subject = "openrouter/meta-llama/llama-3.1-8b-instruct"
+
+    def event(model, provider):
+        return SimpleNamespace(model=model,
+                               call=SimpleNamespace(response={"provider": provider}))
+
+    samples = [SimpleNamespace(events=[event(subject, "Cloudflare"),
+                                       event("openrouter/openai/gpt-4.1-mini", "OpenAI")])
+               for _ in range(5)]
+    mix: dict[str, int] = {}
+    for sample in samples:
+        for e in sample.events:
+            if str(getattr(e, "model", "")) != subject:
+                continue
+            provider = e.call.response.get("provider")
+            if provider:
+                mix[provider] = mix.get(provider, 0) + 1
+
+    assert mix == {"Cloudflare": 5}, "only the model under test counts toward the mix"
+    assert "OpenAI" not in mix
+    assert Runner is not None
