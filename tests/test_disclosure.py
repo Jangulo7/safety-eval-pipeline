@@ -481,3 +481,36 @@ def test_post_hoc_host_capture_says_so(results, config) -> None:
     results.metadata.host = {"gpu_model": "TEST GPU", "captured": "after the run"}
     row = next(r for r in parameter_register(results, config) if r.parameter == "gpu_model")
     assert "after the run" in row.value
+
+
+def test_every_reporter_shows_how_each_value_was_obtained(results, config, tmp_path) -> None:
+    """The register computed a provenance mark for every row and no artefact printed it.
+
+    `measured` and `requested` are the load-bearing distinction: one was read back from the
+    run, the other was sent to an external system that may have discarded it. Printed without
+    the mark they are indistinguishable, and a reader cannot tell a condition from an
+    intention -- which is the whole claim the register exists to support.
+    """
+    from pypdf import PdfReader
+
+    from safety_eval.gates import evaluate
+    from safety_eval.leaderboard import build
+    from safety_eval.reporting.html import render_leaderboard_html
+    from safety_eval.reporting.markdown import render_results_markdown
+    from safety_eval.reporting.pdf import build_pdf
+
+    board, gates = build(results, config), evaluate(results, config)
+
+    md = render_results_markdown(results, config)
+    assert "| provenance |" in md
+    assert "**measured**" in md
+    assert "Provenance says how each value was obtained" in md
+
+    html = render_leaderboard_html(results, config, board, gates, {})
+    assert "<th>Provenance</th>" in html
+    assert "measured" in html
+
+    pdf_path = tmp_path / "r.pdf"
+    build_pdf(results, config, board, gates, {}, pdf_path)
+    text = " ".join(p.extract_text() or "" for p in PdfReader(str(pdf_path)).pages)
+    assert "Provenance" in text, "the printed register must carry the mark too"

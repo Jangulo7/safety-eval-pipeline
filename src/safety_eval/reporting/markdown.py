@@ -20,6 +20,15 @@ from ..results import CellStatus, ResultSet
 from .conditions import COVERAGE_NOTE, PREAMBLE
 from .conditions import build as build_conditions
 
+PROVENANCE = {
+    "measured": "**measured**",
+    "applied": "applied",
+    "requested": "_requested_",
+    "editorial": "_editorial_",
+    "unavailable": "_unavailable_",
+    "n/a": "—",
+}
+
 
 def render_results_markdown(results: ResultSet, config: RunConfig) -> str:
     """Render the full results table with its provenance columns."""
@@ -192,16 +201,28 @@ def _register_section(results: ResultSet, config: RunConfig) -> list[str]:
              "The register from this repository's pre-Inspect pipeline, filled from this "
              "run. It assumes a locally-served quantized model, so applicability depends on "
              "the serving arrangement. A blank row and a not-applicable row make different "
-             "claims, so every unfilled row states its reason.", ""]
+             "claims, so every unfilled row states its reason.", "",
+             "**Provenance says how each value was obtained, which decides what it is worth.** "
+             "`measured` was read back from the run's own artefacts. `applied` was set here, "
+             "where nothing external could discard it. `requested` was sent to an external "
+             "system and *not* verified to have taken effect — a provider that ignored it "
+             "leaves the row looking identical. `editorial` is a label chosen by the "
+             "reporter, `unavailable` cannot be obtained with this code, and `n/a` does not "
+             "apply to this serving arrangement.", ""]
     section = None
     for row in rows:
         if row.section != section:
             section = row.section
-            lines += ["", f"### {section}", "", "| parameter | value | status |",
-                      "|---|---|---|"]
+            lines += ["", f"### {section}", "",
+                      "| parameter | value | status | provenance |",
+                      "|---|---|---|---|"]
         mark = {"recorded": "recorded", "not applicable": "_n/a_",
                 "undisclosed": "**undisclosed**", "missing": "**missing**"}[row.status]
-        lines.append(f"| `{row.parameter}` | {row.value} | {mark} |")
+        # The column the rest of the register exists to qualify. A value that was read back
+        # from the run and a value that was merely sent to a provider look identical once
+        # they are printed; only this says which, and a reader who cannot tell them apart
+        # cannot tell a condition from an intention.
+        lines.append(f"| `{row.parameter}` | {row.value} | {mark} | {PROVENANCE[row.provenance]} |")
     return lines
 
 

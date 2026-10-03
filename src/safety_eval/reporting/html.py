@@ -204,6 +204,11 @@ def render_leaderboard_html(
             register.append({"section": section, "rows": []})
         register[-1]["rows"].append(
             {"parameter": row.parameter, "value": row.value, "status": row.status,
+             "provenance": row.provenance,
+             # `measured` is the only mark that says a number was read back from the run
+             # rather than sent somewhere and hoped for, so it is the only one highlighted.
+             "pcls": {"measured": "pass", "applied": "pass", "requested": "warn",
+                      "editorial": "", "unavailable": "fail", "n/a": ""}[row.provenance],
              "cls": {"recorded": "pass", "not applicable": "",
                      "undisclosed": "blocked", "missing": "fail"}[row.status]})
 

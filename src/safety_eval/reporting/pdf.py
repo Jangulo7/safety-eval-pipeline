@@ -357,13 +357,15 @@ def build_pdf(
             Paragraph(str(row.parameter), styles["cell"]),
             Paragraph(str(row.value), styles["cell"]),
             Paragraph(row.status, styles["cell"]),
+            Paragraph(row.provenance, styles["cell"]),
         ])
     for section, body_rows in sections:
         head = [Paragraph(h, styles["cellhead"])
-                for h in ["Parameter", "Value", "Status"]]
+                for h in ["Parameter", "Value", "Status", "Provenance"]]
         story.append(KeepTogether([
             Paragraph(section, styles["h2"]),
-            _table([head] + body_rows, [44 * mm, CONTENT_W - 74 * mm, 26 * mm]),
+            _table([head] + body_rows,
+                   [38 * mm, CONTENT_W - 94 * mm, 24 * mm, 26 * mm]),
         ]))
         story.append(Spacer(1, 5))
 

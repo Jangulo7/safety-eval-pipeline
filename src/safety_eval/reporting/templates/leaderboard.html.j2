@@ -283,11 +283,12 @@ cannot be filled carries its reason.</p>
 <details>
   <summary>{{ sec.section }}</summary>
   <div class="scroll"><table>
-    <thead><tr><th>Parameter</th><th>Value</th><th>Status</th></tr></thead>
+    <thead><tr><th>Parameter</th><th>Value</th><th>Status</th><th>Provenance</th></tr></thead>
     <tbody>
     {% for r in sec.rows %}
       <tr><td><code>{{ r.parameter }}</code></td><td style="white-space:normal">{{ r.value }}</td>
-      <td>{% if r.cls %}<span class="pill {{ r.cls }}">{{ r.status }}</span>{% else %}<span class="na">{{ r.status }}</span>{% endif %}</td></tr>
+      <td>{% if r.cls %}<span class="pill {{ r.cls }}">{{ r.status }}</span>{% else %}<span class="na">{{ r.status }}</span>{% endif %}</td>
+      <td>{% if r.pcls %}<span class="pill {{ r.pcls }}">{{ r.provenance }}</span>{% else %}<span class="na">{{ r.provenance }}</span>{% endif %}</td></tr>
     {% endfor %}
     </tbody>
   </table></div>
