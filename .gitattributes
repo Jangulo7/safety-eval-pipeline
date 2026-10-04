@@ -1,0 +1,10 @@
+# GitHub's language statistics count bytes of tracked files, so a single generated
+# report outweighs the whole source tree: one 790 KB leaderboard.html against 722 KB
+# of Python across 68 files, reported as an HTML project. The published report is
+# output, not source -- it is produced by src/safety_eval/reporting/ from a run's
+# results.json and is committed so a reader can see a real report without running the
+# pipeline. Marking it generated excludes it from the language bar and collapses it in
+# diffs, where a regenerated 790 KB file is noise.
+#
+# The Jinja template it is rendered from IS source and is deliberately not marked.
+results/published/*.html linguist-generated=true
