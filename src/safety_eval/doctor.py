@@ -15,6 +15,7 @@ the harness that is installed.
 from __future__ import annotations
 
 import os
+import subprocess
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from enum import Enum
@@ -252,7 +253,14 @@ def _check_vllm_server(d: Diagnosis) -> None:
     """
     base_url = os.environ.get("VLLM_BASE_URL", "")
     if not base_url:
-        d.add("vllm server", Level.FAIL, "VLLM_BASE_URL is not set",
+        # Unset is the CORRECT state for two of the three ways this pipeline runs: the hosted
+        # path never uses it, and `run-local` sets it itself after starting the server it
+        # addresses. Reporting those as failures trains the reader to ignore the preflight,
+        # which costs more than the case it catches. It is a warning, and it says which case
+        # it applies to.
+        d.add("vllm server", Level.WARN,
+              "VLLM_BASE_URL is not set — correct for the hosted path, and for `run-local`, "
+              "which sets it itself after starting its own server",
               "start the server from its own virtualenv and export the URL:\n"
               "  ~/venvs/vllm/bin/vllm serve <model> --port 8000 --api-key inspectai\n"
               "  export VLLM_BASE_URL=http://127.0.0.1:8000/v1\n"
@@ -481,6 +489,33 @@ def _check_stratum_coverage(d: Diagnosis, config: RunConfig, catalog: Catalog) -
             d.add(name, Level.OK, detail)
 
 
+
+def _git_ignores(path: Path) -> bool | None:
+    """True/False if git decides, None if git cannot be asked.
+
+    `git check-ignore` is the authority on whether a path can reach a commit. Parsing
+    .gitignore ourselves reimplements a matcher that already exists and gets it wrong.
+    """
+    try:
+        r = subprocess.run(["git", "check-ignore", "-q", str(path)],
+                           capture_output=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if r.returncode in (0, 1):
+        return r.returncode == 0
+    return None
+
+
+def _git_tracked(path: Path) -> list[str]:
+    """Files under `path` that git already follows. An ignore rule cannot save these."""
+    try:
+        r = subprocess.run(["git", "ls-files", "--", str(path)],
+                           capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return []
+    return [l for l in r.stdout.splitlines() if l.strip()] if r.returncode == 0 else []
+
+
 def _check_log_safety(d: Diagnosis, config: RunConfig, catalog: Catalog) -> None:
     """The one check that is about publication, not about running.
 
@@ -492,24 +527,54 @@ def _check_log_safety(d: Diagnosis, config: RunConfig, catalog: Catalog) -> None
         d.add("log safety", Level.OK, "no benchmark withholds transcripts")
         return
 
-    gitignore = Path(".gitignore")
-    text = gitignore.read_text(encoding="utf-8") if gitignore.exists() else ""
-    unprotected = []
+    # Ask git whether the path is ignored, rather than grepping .gitignore for a literal.
+    # Substring-matching the file misses every broader rule that covers the same path -- a
+    # plain `logs/` rule protects every task directory beneath it, and a check that reports
+    # those as unprotected is a safety check that cries wolf. `git check-ignore` is the
+    # authority, because it is what actually decides whether a commit can carry the file.
+    unprotected: list[str] = []
+    untested: list[str] = []
     for bench in withheld:
-        keys = [t.key for t in config.tasks if t.benchmark == bench.key]
-        if not any(f"logs/{k}" in text or f"logs/{bench.key}" in text for k in keys + [bench.key]):
-            unprotected.append(bench.key)
+        keys = [t.key for t in config.tasks if t.benchmark == bench.key] or [bench.key]
+        for key in keys:
+            # Probe a hypothetical FILE inside the directory rather than the directory
+            # itself. `git check-ignore` decides directory-ness from the filesystem, so a
+            # `logs/<task>/` rule does not match a directory that has not been created yet,
+            # and the check would report a correctly-protected repo as unprotected before
+            # its first run. A file path is matched lexically and works for either rule
+            # shape, whether or not anything exists on disk.
+            path = Path("logs") / key / ".transcript-probe"
+            ignored = _git_ignores(path)
+            if ignored is None:
+                untested.append(key)
+            elif not ignored:
+                unprotected.append(key)
+
+    # A rule that ignores the path does not help if the file is already tracked: .gitignore
+    # has no effect on a path git is already following.
+    tracked = _git_tracked(Path("logs"))
 
     if unprotected:
         d.add("log safety", Level.FAIL,
-              f"{', '.join(unprotected)} withholds transcripts but its log directory is not "
-              "gitignored",
-              "add `logs/<task>/` to .gitignore — these logs contain model responses to "
+              f"{', '.join(sorted(set(unprotected)))} withholds transcripts but its log "
+              "directory is not ignored by git",
+              "add `logs/` to .gitignore — these logs contain model responses to "
               "forbidden prompts and must never be committed")
+    elif tracked:
+        d.add("log safety", Level.FAIL,
+              f"{len(tracked)} file(s) under logs/ are already TRACKED by git, so ignoring "
+              "the path has no effect",
+              "`git rm --cached` them before the next commit: "
+              + ", ".join(tracked[:3]) + (" …" if len(tracked) > 3 else ""))
+    elif untested:
+        d.add("log safety", Level.WARN,
+              "git is unavailable, so transcript protection could not be verified for: "
+              + ", ".join(sorted(set(untested))),
+              "check by hand that logs/ is ignored before committing")
     else:
         d.add("log safety", Level.OK,
-              f"transcripts withheld and gitignored for: "
-              f"{', '.join(b.key for b in withheld)}")
+              f"transcripts withheld, and git confirms the log paths are ignored and "
+              f"untracked for: {', '.join(b.key for b in withheld)}")
 
 
 def _check_metric_drift(d: Diagnosis, config: RunConfig, catalog: Catalog) -> None:

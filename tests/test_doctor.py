@@ -61,13 +61,18 @@ def test_a_present_key_is_masked_not_echoed(config, clean_env, tmp_path) -> None
     assert "abcdefghijklmnop" not in check.detail
 
 
-def test_a_local_model_needs_a_server_not_a_key(config, clean_env) -> None:
-    """Inspect would otherwise try to start its own vLLM, which needs a torch this
-    environment cannot host without replacing its own."""
+def test_an_unset_vllm_url_warns_rather_than_failing(config, clean_env) -> None:
+    """Unset is the correct state for two of the three ways this pipeline runs.
+
+    The hosted path never reads it, and `run-local` sets it itself after starting the server
+    it addresses. Calling that a failure made the preflight exit 1 on a correct configuration,
+    which teaches the reader to ignore the preflight -- a worse outcome than the case it
+    catches. W7.
+    """
     clean_env.delenv("VLLM_BASE_URL", raising=False)
     check = find(diagnose(config, check_network=False), "vllm server")
-    assert check.level is Level.FAIL
-    assert "VLLM_BASE_URL" in check.detail
+    assert check.level is Level.WARN
+    assert "run-local" in check.detail
     assert "vllm serve" in check.fix
 
 
@@ -95,22 +100,59 @@ def test_gated_dataset_with_a_token_is_not_verified_offline(config, clean_env) -
     assert "not verified" in check.detail
 
 
+def _repo(tmp_path, ignore: str):
+    """A real git repo, because the check asks git rather than parsing .gitignore itself."""
+    import subprocess
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    (tmp_path / ".gitignore").write_text(ignore)
+    return tmp_path
+
+
 def test_log_safety_check_catches_an_ungitignored_withheld_task(
     config, clean_env, tmp_path, monkeypatch
 ) -> None:
     """A repo that publishes a working jailbreak has failed regardless of its scores."""
-    monkeypatch.chdir(tmp_path)
-    (tmp_path / ".gitignore").write_text("__pycache__/\n")
+    monkeypatch.chdir(_repo(tmp_path, "__pycache__/\n"))
     check = find(diagnose(config, check_network=False), "log safety")
     assert check.level is Level.FAIL
     assert "strong_reject" in check.detail
     assert "forbidden prompts" in check.fix
 
 
-def test_log_safety_check_passes_when_gitignored(config, clean_env, tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    (tmp_path / ".gitignore").write_text("logs/strong_reject/\n")
+def test_log_safety_check_passes_on_an_exact_rule(config, clean_env, tmp_path, monkeypatch):
+    monkeypatch.chdir(_repo(tmp_path, "logs/strong_reject/\n"))
     assert find(diagnose(config, check_network=False), "log safety").level is Level.OK
+
+
+def test_log_safety_check_honours_a_broader_rule(config, clean_env, tmp_path, monkeypatch):
+    """W7. A plain `logs/` rule protects every task directory beneath it.
+
+    The check used to substring-match `logs/<task>` against the text of .gitignore, so this
+    repo -- which is this project's own arrangement -- was reported as unprotected on every
+    run. A safety check that cries wolf trains people to ignore it, and this one was ignored
+    for days. `git check-ignore` is the authority because it is what decides whether a commit
+    can carry the file.
+    """
+    monkeypatch.chdir(_repo(tmp_path, "logs/\n"))
+    assert find(diagnose(config, check_network=False), "log safety").level is Level.OK
+
+
+def test_log_safety_check_fails_when_the_logs_are_already_tracked(
+    config, clean_env, tmp_path, monkeypatch
+) -> None:
+    """An ignore rule has no effect on a path git already follows."""
+    import subprocess
+    repo = _repo(tmp_path, "logs/\n")
+    d = repo / "logs" / "strong_reject"
+    d.mkdir(parents=True)
+    (d / "transcript.eval").write_text("x")
+    subprocess.run(["git", "add", "-f", "logs/strong_reject/transcript.eval"],
+                   cwd=repo, check=True)
+    monkeypatch.chdir(repo)
+    check = find(diagnose(config, check_network=False), "log safety")
+    assert check.level is Level.FAIL
+    assert "TRACKED" in check.detail
+    assert "git rm --cached" in check.fix
 
 
 def test_harness_versions_are_reported(config, clean_env) -> None:
