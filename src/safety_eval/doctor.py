@@ -15,6 +15,7 @@ the harness that is installed.
 from __future__ import annotations
 
 import os
+import json
 import subprocess
 from collections.abc import Iterable
 from dataclasses import dataclass, field
@@ -23,6 +24,7 @@ from pathlib import Path
 from typing import Any
 
 from .catalog import BenchmarkSpec, Catalog
+from .local_runner import DEFAULT_VLLM_PYTHON
 from .config import ConfigError, RunConfig
 from .runner import harness_versions
 
@@ -135,6 +137,7 @@ def diagnose(
     _check_aws(d)
     _check_sample_ordering(d, config, catalog)
     _check_stratum_coverage(d, config, catalog)
+    _check_tool_parsers(d, config)
     _check_log_safety(d, config, catalog)
     if check_metrics:
         _check_metric_drift(d, config, catalog)
@@ -514,6 +517,91 @@ def _git_tracked(path: Path) -> list[str]:
     except (OSError, subprocess.SubprocessError):
         return []
     return [l for l in r.stdout.splitlines() if l.strip()] if r.returncode == 0 else []
+
+
+
+def _vllm_parser_names(vllm_python: Path) -> list[str] | None:
+    """vLLM's REGISTERED tool-call parser names, asked of the engine rather than guessed.
+
+    The registered name is not always the module filename -- the module is
+    `phi4mini_tool_parser.py` but the name the engine accepts is `phi4_mini_json`, and
+    `internlm2_tool_parser.py` registers as `internlm`. Reading names off filenames produces a
+    config that fails at serve time, after a model download and a GPU allocation.
+    """
+    # Ask the registry the engine's own validator consults. The CLI parser is not a usable
+    # source: its --tool-call-parser action carries no `choices`, so the names are only
+    # resolved when the server starts.
+    code = ("import json;from vllm.tool_parsers import ToolParserManager as M;"
+            "print(json.dumps(sorted(M.list_registered())))")
+    try:
+        r = subprocess.run([str(vllm_python), "-c", code],
+                           capture_output=True, text=True, timeout=120)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if r.returncode != 0:
+        return None
+    try:
+        names = json.loads(r.stdout.strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        return None
+    return names or None
+
+
+def _check_tool_parsers(d: Diagnosis, config: RunConfig) -> None:
+    """Every configured tool-call parser must be a name the engine actually accepts.
+
+    This check exists because of a measured failure: a parser name taken from a module
+    filename was accepted by the config, survived a 7 GB model download, and only failed when
+    vLLM refused to start. That is the *good* case. The case this cannot catch is a name that
+    is valid but wrong for the model, which vLLM accepts in silence and which returns every
+    tool call as prose -- `verify_tool_calling` is the check for that, and it runs against the
+    live server rather than the config.
+    """
+    serving = config.raw.get("serving") or {}
+    if not serving.get("tool_calling"):
+        d.add("tool parsers", Level.SKIP, "tool calling is off for this run")
+        return
+    parsers = serving.get("tool_call_parsers") or {}
+    if not parsers:
+        d.add("tool parsers", Level.FAIL, "tool calling is on but no parser map is configured",
+              "add `serving.tool_call_parsers`, one entry per model family")
+        return
+
+    names = _vllm_parser_names(Path(serving.get("vllm_python") or DEFAULT_VLLM_PYTHON))
+    if names is None:
+        d.add("tool parsers", Level.WARN,
+              f"{len(parsers)} parser(s) configured; the vLLM interpreter could not be asked "
+              "which names it accepts, so they are unverified",
+              "check that serving.vllm_python points at the environment that serves models")
+        return
+
+    bad = {fam: par for fam, par in parsers.items() if par not in names}
+    if bad:
+        detail = ", ".join(f"{fam} -> {par!r}" for fam, par in sorted(bad.items()))
+        # Suggest by comparing names stripped of separators, which is what the two naming
+        # conventions actually differ by: the module `phi4mini_tool_parser.py` registers as
+        # `phi4_mini_json`, and `internlm2_tool_parser.py` registers as `internlm`.
+        def _norm(s: str) -> str:
+            return "".join(ch for ch in s.lower() if ch.isalnum())
+
+        near = {}
+        for fam, par in bad.items():
+            np = _norm(par)
+            cand = [n for n in names
+                    if _norm(n).startswith(np) or np.startswith(_norm(n))]
+            if cand:
+                near[fam] = min(cand, key=len)
+        fix = ("vLLM accepts: " + ", ".join(names))
+        if near:
+            fix = ("did you mean " + ", ".join(f"{fam}: {n!r}" for fam, n in near.items())
+                   + "? " + fix)
+        d.add("tool parsers", Level.FAIL,
+              f"{len(bad)} configured parser name(s) the engine does not accept: {detail}", fix)
+        return
+
+    d.add("tool parsers", Level.OK,
+          f"all {len(parsers)} configured parser(s) are names this vLLM accepts: "
+          + ", ".join(f"{f}->{p}" for f, p in sorted(parsers.items())))
 
 
 def _check_log_safety(d: Diagnosis, config: RunConfig, catalog: Catalog) -> None:

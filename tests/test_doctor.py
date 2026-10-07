@@ -280,3 +280,68 @@ def test_deterministic_benchmarks_are_not_checked(config, catalog, clean_env) ->
     names = {c.name for c in diagnose(config, catalog, check_network=False).checks}
     assert "sample order:sycophancy" in names
     assert "sample order:strong_reject" not in names
+
+
+# --- tool-call parser names -------------------------------------------------------------
+
+def _cfg_with(tmp_path, config, **parsers):
+    """The committed config with tool calling on and the parser map overridden."""
+    import yaml
+    from safety_eval.config import RunConfig
+    data = yaml.safe_load(Path("config/eval_config.yaml").read_text())
+    data["serving"]["tool_calling"] = True
+    data["serving"]["tool_call_parsers"].update(parsers)
+    p = tmp_path / "cfg.yaml"
+    p.write_text(yaml.safe_dump(data, sort_keys=False))
+    return RunConfig.load(p, config.catalog)
+
+
+def test_tool_parser_check_skips_when_tool_calling_is_off(config, clean_env) -> None:
+    from safety_eval.doctor import Diagnosis, _check_tool_parsers
+    d = Diagnosis()
+    _check_tool_parsers(d, config)
+    assert d.checks[-1].level is Level.SKIP
+
+
+def test_configured_parser_names_are_accepted_by_the_engine(config, clean_env, tmp_path) -> None:
+    """The committed map must name parsers this vLLM actually registers."""
+    from safety_eval.doctor import Diagnosis, _check_tool_parsers
+    d = Diagnosis()
+    _check_tool_parsers(d, _cfg_with(tmp_path, config))
+    c = d.checks[-1]
+    assert c.level in (Level.OK, Level.WARN)   # WARN only if the vLLM env is unavailable
+    if c.level is Level.OK:
+        assert "llama3_json" in c.detail
+
+
+def test_a_parser_name_taken_from_a_module_filename_is_rejected(
+    config, clean_env, tmp_path
+) -> None:
+    """The failure this check exists for, measured 2026-10-07.
+
+    `phi4mini` is the module filename; the name the engine registers is `phi4_mini_json`. The
+    wrong one survived config loading and a 7 GB model download, and only failed when vLLM
+    refused to start. The check turns that into a preflight failure that names the right value.
+    """
+    from safety_eval.doctor import Diagnosis, _check_tool_parsers
+    d = Diagnosis()
+    _check_tool_parsers(d, _cfg_with(tmp_path, config, phi="phi4mini"))
+    c = d.checks[-1]
+    if c.level is Level.WARN:
+        pytest.skip("the vLLM environment could not be queried")
+    assert c.level is Level.FAIL
+    assert "phi4mini" in c.detail
+    assert "phi4_mini_json" in c.fix        # it suggests the right name, not just a list
+
+
+def test_an_unknown_parser_name_fails_and_lists_the_valid_set(
+    config, clean_env, tmp_path
+) -> None:
+    from safety_eval.doctor import Diagnosis, _check_tool_parsers
+    d = Diagnosis()
+    _check_tool_parsers(d, _cfg_with(tmp_path, config, qwen="zzz_not_a_parser"))
+    c = d.checks[-1]
+    if c.level is Level.WARN:
+        pytest.skip("the vLLM environment could not be queried")
+    assert c.level is Level.FAIL
+    assert "hermes" in c.fix and "mistral" in c.fix

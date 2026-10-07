@@ -39,6 +39,28 @@ serving:
     llama: llama3_json
     qwen: hermes
     mistral: mistral
+    # Granite 3.3 carries tool support in its OWN chat template (`tools`, `tool_call` and
+    # `available_tools` all appear in tokenizer_config.json), so unlike vLLM's granite example
+    # -- which expects examples/tool_chat_template_granite.jinja, a file the wheel does not
+    # ship -- no `--chat-template` override is needed. That distinction matters: the missing
+    # example template is exactly what left Llama-3.1 unable to emit a parseable call.
+    granite: granite
+    # Phi-4-mini is mapped but NOT USABLE for agentic benchmarks here, and the entry is kept
+    # because the reason is worth recording. The parser name below is correct. The model is
+    # still unusable: its packaged chat template reads tools from a `tools` key on a SYSTEM
+    # MESSAGE, while vLLM supplies tools as a separate template variable, so the template
+    # never receives them and the model is never told a tool exists. Measured 2026-10-07: 0
+    # parsed calls over 12 AgentHarm rollouts, 11 of which scored as refusals -- most
+    # plausibly honest refusals of a task it had no means to perform, not a parser failure.
+    # Making it work needs a custom chat template, which is a serving condition and would
+    # prompt this model differently from every other, so it is excluded instead.
+    #
+    # NOTE on names: these are vLLM's REGISTERED parser names, which are not always the module
+    # filename -- the module is `phi4mini_tool_parser.py` and the registered name is
+    # `phi4_mini_json`. A wrong name fails loudly at serve time, which is the good case; the
+    # dangerous case is a name that is valid but wrong for the model, which vLLM accepts in
+    # silence. `doctor` now checks every name here against the engine's own registry.
+    phi: phi4_mini_json
 
 models:
   - id: vllm/Qwen/Qwen2.5-7B-Instruct
